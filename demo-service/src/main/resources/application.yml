@@ -10,6 +10,13 @@ spring:
   application:
     name: demo-service
 
+guardgate:
+  demo:
+    jwt:
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+      issuer: ${JWT_ISSUER:guardgate-auth}
+      audience: ${JWT_AUDIENCE:guardgate}
+
 management:
   endpoints:
     web:
