@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import reactor.core.publisher.Mono;
 
@@ -30,7 +31,13 @@ public class RevocationCheckingJwtDecoder implements ReactiveJwtDecoder {
 
     @Override
     public Mono<Jwt> decode(String token) {
-        return delegate.decode(token).flatMap(this::ensureNotRevoked);
+        return delegate.decode(token)
+                // Lỗi hạ tầng (vd. không tải được JWKS) → JwtException thường (không phải BadJwtException):
+                // Spring Security biến nó thành AuthenticationServiceException → GatewayErrorHandler trả 503
+                // thay vì để IllegalStateException trần lọt ra thành 500.
+                .onErrorMap(e -> !(e instanceof JwtException),
+                        e -> new JwtException("Unable to verify token: signing keys unavailable", e))
+                .flatMap(this::ensureNotRevoked);
     }
 
     private Mono<Jwt> ensureNotRevoked(Jwt jwt) {

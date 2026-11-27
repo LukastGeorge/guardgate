@@ -15,9 +15,41 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 2s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Tắt bộ lọc Forwarded/X-Forwarded có sẵn: ForwardedHeadersFilter tự đặt giá trị an toàn
+          x-forwarded:
+            enabled: false
+          forwarded:
+            enabled: false
+          httpclient:
+            connect-timeout: 2000            # ms (D13)
+            response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:5s}
+          default-filters:
+            # Downstream cũng gửi header bảo mật => chỉ giữ một bản
+            - DedupeResponseHeader=Access-Control-Allow-Origin X-Content-Type-Options X-Frame-Options Cache-Control Content-Security-Policy Referrer-Policy, RETAIN_FIRST
+            - name: RequestSize
+              args:
+                maxSize: 1MB
+          routes:
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**,/api/users/**,/api/admin/**,/oauth2/**,/login/oauth2/**
+            - id: demo-service
+              uri: ${DEMO_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/demo/**
+            # Không có route cho /.well-known/** hay /actuator/** của downstream => 404 từ bên ngoài
 
 guardgate:
   gateway:
+    # Số proxy tin cậy đứng trước gateway (D9): 0 khi chạy local, 1 khi sau ingress trên K8s
+    trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:0}
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:}
     jwt:
       # Public key của auth-service; trong K8s là http://auth-service:8081/.well-known/jwks.json
       jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
