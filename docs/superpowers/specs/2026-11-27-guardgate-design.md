@@ -260,7 +260,7 @@ erDiagram
 | H1 | HIGH | Spring Boot 3.5.7: CVE-2026-22731, CVE-2026-22733 (Actuator auth bypass) | Nâng lên 3.5.12 | ✅ GĐ3 Task 1 |
 | H2 | HIGH | pgjdbc 42.7.8: CVE-2026-42198 (DoS), CVE-2026-54291 (SCRAM downgrade) | Ghim 42.7.12 | ✅ GĐ3 Task 1 |
 | H3 | MEDIUM | Mật khẩu ≤ 64 **ký tự** nhưng có thể > 72 **byte** UTF-8 (BCrypt giới hạn 72 byte); emoji/tiếng Việt có dấu có thể gây lỗi 500 | Validate độ dài theo byte UTF-8 ≤ 72 | ✅ GĐ3 Task 1 |
-| H4 | LOW | Chưa rà soát thủ công đầy đủ phần OAuth2 khi đứng sau gateway (redirect-uri) | Kiểm tra trong smoke test giai đoạn 3 | ⏳ GĐ3 Task 6 |
+| H4 | LOW | Chưa rà soát thủ công đầy đủ phần OAuth2 khi đứng sau gateway (redirect-uri) | Kiểm tra trong smoke test giai đoạn 3 | ✅ GĐ3 Task 6: phát hiện **bug thật**: redirect_uri mất cổng (thiếu X-Forwarded-Port) → đã sửa, smoke test kiểm tra |
 | H5 | MEDIUM | Chưa có test **đồng thời** cho lockout (20 request sai song song phải khoá đúng 1 lần) và cho rotation (2 request refresh song song cùng một token thì đúng 1 cái thành công) | Thêm IT chạy song song | ✅ GĐ3 Task 1: test đồng thời phát hiện **bug thật**: lockout bị kích hoạt nhiều lần → đã sửa |
 | H6 | LOW | Luồng GitHub OAuth2 chưa có test tự động (chỉ test khi profile tắt) | Unit test `OAuth2AccountService` + `GitHubOAuth2UserService` (mock `RestClient`) | ✅ GĐ3 Task 1 |
 

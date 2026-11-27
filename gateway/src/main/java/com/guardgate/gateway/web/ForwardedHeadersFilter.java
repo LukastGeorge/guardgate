@@ -37,8 +37,13 @@ public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
 
         String clientIp = clientIpResolver.resolve(exchange);
         String proto = firstOr(trustIncoming ? incoming.getFirst("X-Forwarded-Proto") : null, uri.getScheme());
-        String host = firstOr(trustIncoming ? incoming.getFirst("X-Forwarded-Host") : null,
+        // Host header có dạng "host:port"; tách riêng vì Tomcat (auth-service) lấy port từ X-Forwarded-Port,
+        // thiếu header này thì nó coi là cổng mặc định của scheme (80) → redirect_uri OAuth2 sai cổng (H4).
+        String hostAndPort = firstOr(trustIncoming ? incoming.getFirst("X-Forwarded-Host") : null,
                 firstOr(incoming.getFirst(HttpHeaders.HOST), uri.getHost()));
+        String host = stripPort(hostAndPort);
+        String port = firstOr(trustIncoming ? incoming.getFirst("X-Forwarded-Port") : null,
+                portOf(hostAndPort, proto));
 
         ServerHttpRequest sanitized = original.mutate().headers(headers -> {
             List<String> toRemove = headers.keySet().stream()
@@ -51,6 +56,7 @@ public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
             headers.set("X-Forwarded-For", clientIp);
             headers.set("X-Forwarded-Proto", proto);
             headers.set("X-Forwarded-Host", host);
+            headers.set("X-Forwarded-Port", port);
         }).build();
         return chain.filter(exchange.mutate().request(sanitized).build());
     }
@@ -58,6 +64,20 @@ public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
     @Override
     public int getOrder() {
         return Ordered.HIGHEST_PRECEDENCE;
+    }
+
+    /** "localhost:8080" → "localhost"; "[::1]:8080" → "[::1]"; "example.com" → "example.com". */
+    static String stripPort(String hostAndPort) {
+        int colon = hostAndPort.lastIndexOf(':');
+        return colon > hostAndPort.lastIndexOf(']') ? hostAndPort.substring(0, colon) : hostAndPort;
+    }
+
+    static String portOf(String hostAndPort, String scheme) {
+        int colon = hostAndPort.lastIndexOf(':');
+        if (colon > hostAndPort.lastIndexOf(']')) {
+            return hostAndPort.substring(colon + 1);
+        }
+        return "https".equalsIgnoreCase(scheme) ? "443" : "80";
     }
 
     private static String firstOr(String value, String fallback) {

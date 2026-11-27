@@ -1,0 +1,6 @@
+# Profile "local": đọc .env ở thư mục gốc (KEY=VALUE tương thích .properties). Không dùng trong container/K8s.
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]

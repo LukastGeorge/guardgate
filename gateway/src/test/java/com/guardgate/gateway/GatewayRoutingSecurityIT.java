@@ -63,6 +63,19 @@ class GatewayRoutingSecurityIT extends AbstractGatewayIT {
     }
 
     @Test
+    void forwardedHostPortAndProtoDescribeTheGateway() {
+        // auth-service dựng redirect_uri của OAuth2 từ các header này (H4): thiếu port → Tomcat tự cho là 80
+        DOWNSTREAM.stubFor(get("/api/demo/public").willReturn(okJson("{}")));
+
+        client.get().uri("/api/demo/public").exchange().expectStatus().isOk();
+
+        DOWNSTREAM.verify(getRequestedFor(urlEqualTo("/api/demo/public"))
+                .withHeader("X-Forwarded-Proto", equalTo("http"))
+                .withHeader("X-Forwarded-Host", equalTo("localhost"))
+                .withHeader("X-Forwarded-Port", equalTo(String.valueOf(port))));
+    }
+
+    @Test
     void protectedRouteWithoutTokenReturns401Problem() {
         client.get().uri("/api/users/me").exchange()
                 .expectStatus().isUnauthorized()
