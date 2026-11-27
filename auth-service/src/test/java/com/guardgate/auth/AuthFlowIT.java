@@ -90,6 +90,17 @@ class AuthFlowIT extends AbstractIntegrationTest {
     }
 
     @Test
+    void passwordLongerThan72BytesIsRejectedWith400() throws Exception {
+        // 55 ký tự (hợp lệ theo @Size) nhưng 85 byte UTF-8: BCrypt chỉ xử lý được 72 byte
+        String password = "Mật-khẩu-😀".repeat(5);
+
+        postJson("/api/auth/register", Map.of("email", uniqueEmail(), "password", password))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.errors[*].field", containsInAnyOrder("password")));
+    }
+
+    @Test
     void malformedJsonDoesNotLeakParserDetails() throws Exception {
         String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content("{not json"))
                 .andExpect(status().isBadRequest())

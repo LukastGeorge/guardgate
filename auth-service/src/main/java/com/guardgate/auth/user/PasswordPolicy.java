@@ -9,6 +9,8 @@ public final class PasswordPolicy {
 
     public static final int MIN_LENGTH = 12;
     public static final int MAX_LENGTH = 64;
+    /** Giới hạn cứng của BCrypt; mật khẩu nhiều ký tự đa byte có thể vượt dù ≤ MAX_LENGTH ký tự. */
+    public static final int MAX_BYTES = 72;
 
     private PasswordPolicy() {
     }

@@ -1,5 +1,6 @@
 package com.guardgate.auth.auth.dto;
 
+import com.guardgate.auth.user.MaxUtf8Bytes;
 import com.guardgate.auth.user.PasswordPolicy;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -10,7 +11,8 @@ import jakarta.validation.constraints.Size;
  */
 public record RegisterRequest(
         @NotBlank @Email(regexp = ".+@.+\\..+") @Size(max = 254) String email,
-        @NotBlank @Size(min = PasswordPolicy.MIN_LENGTH, max = PasswordPolicy.MAX_LENGTH) String password) {
+        @NotBlank @Size(min = PasswordPolicy.MIN_LENGTH, max = PasswordPolicy.MAX_LENGTH)
+        @MaxUtf8Bytes(PasswordPolicy.MAX_BYTES) String password) {
 
     @Override
     public String toString() {
