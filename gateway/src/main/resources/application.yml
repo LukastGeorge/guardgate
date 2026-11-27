@@ -9,7 +9,20 @@ server:
 spring:
   application:
     name: gateway
-  # Routes, JWT filter và rate limiter (Redis) sẽ được cấu hình ở giai đoạn 3.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+
+guardgate:
+  gateway:
+    jwt:
+      # Public key của auth-service; trong K8s là http://auth-service:8081/.well-known/jwks.json
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+      issuer: ${JWT_ISSUER:guardgate-auth}
+      audience: ${JWT_AUDIENCE:guardgate}
 
 management:
   endpoints:
