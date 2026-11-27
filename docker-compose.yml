@@ -1,0 +1,81 @@
+# Hạ tầng local cho GuardGate (giai đoạn 1: Postgres + Redis).
+# Các service ứng dụng sẽ được thêm vào ở giai đoạn 4 sau khi có Dockerfile.
+#
+# Mọi secret lấy từ file .env (KHÔNG commit). Cú pháp ${VAR:?msg} làm compose
+# dừng ngay nếu thiếu biến, thay vì âm thầm chạy với mật khẩu rỗng.
+
+name: guardgate
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: guardgate-postgres
+    restart: unless-stopped
+    environment:
+      # Tài khoản superuser: chỉ dùng cho init/quản trị, ứng dụng KHÔNG dùng tài khoản này
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD is required}
+      POSTGRES_DB: postgres
+      # Thông tin DB + user riêng cho auth-service (least privilege), dùng bởi script init
+      AUTH_DB_NAME: ${AUTH_DB_NAME:?AUTH_DB_NAME is required}
+      AUTH_DB_USER: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}
+      # Bắt buộc xác thực bằng SCRAM-SHA-256 thay vì md5/trust
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      # Chỉ bind vào localhost: máy khác trong mạng LAN không truy cập được
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  redis:
+    image: redis:7.4.6-alpine
+    container_name: guardgate-redis
+    restart: unless-stopped
+    environment:
+      # redis-cli tự đọc biến REDISCLI_AUTH -> không phải truyền mật khẩu qua tham số dòng lệnh
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server
+        --requirepass "$$REDISCLI_AUTH"
+        --appendonly yes
+        --protected-mode yes
+        --rename-command FLUSHALL ""
+        --rename-command FLUSHDB ""
+        --rename-command CONFIG ""
+        --rename-command DEBUG ""
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  backend:
+    name: guardgate-backend

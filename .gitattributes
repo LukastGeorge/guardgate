@@ -1,0 +1,5 @@
+# Chuẩn hoá line ending: tránh script .sh bị CRLF trên Windows -> container Linux báo lỗi "bad interpreter"
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.jar binary

@@ -1,0 +1,24 @@
+server:
+  port: ${AUTH_SERVICE_PORT:8081}
+  # Không bao giờ trả stack trace / message nội bộ cho client (OWASP A05)
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+spring:
+  application:
+    name: auth-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Chỉ mở những endpoint cần thiết; /actuator/env, /heapdump... tuyệt đối không public
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
