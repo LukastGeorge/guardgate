@@ -1,0 +1,12 @@
+# Profile "local": chạy trên máy dev bằng `mvnw -pl auth-service spring-boot:run -Dspring-boot.run.profiles=local`.
+# File .env (định dạng KEY=VALUE) tương thích với .properties nên Spring đọc trực tiếp được.
+# Trong container/K8s KHÔNG dùng profile này: biến môi trường được inject từ Secret.
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+
+logging:
+  level:
+    com.guardgate: DEBUG

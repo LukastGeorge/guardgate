@@ -1,0 +1,14 @@
+# Profile "github": bật OAuth2 login qua GitHub.
+# Tạo OAuth App tại https://github.com/settings/developers
+#   Authorization callback URL: http://localhost:8081/login/oauth2/code/github
+# rồi đặt GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET trong .env
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: ${GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET}
+            # user:email để đọc email ĐÃ XÁC MINH (kể cả khi user để email ở chế độ private)
+            scope: read:user,user:email

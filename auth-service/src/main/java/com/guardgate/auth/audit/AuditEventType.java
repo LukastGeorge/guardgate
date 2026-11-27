@@ -1,0 +1,14 @@
+package com.guardgate.auth.audit;
+
+public enum AuditEventType {
+    USER_REGISTERED,
+    LOGIN_SUCCESS,
+    LOGIN_FAILURE,
+    ACCOUNT_LOCKED,
+    ACCOUNT_UNLOCKED,
+    TOKEN_REFRESHED,
+    REFRESH_TOKEN_REUSE_DETECTED,
+    LOGOUT,
+    OAUTH2_LOGIN_SUCCESS,
+    OAUTH2_LOGIN_FAILURE
+}

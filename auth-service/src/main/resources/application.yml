@@ -1,5 +1,8 @@
 server:
   port: ${AUTH_SERVICE_PORT:8081}
+  # Tin header X-Forwarded-* CHỈ khi request đến từ dải IP nội bộ (gateway/ingress).
+  # Client bên ngoài không thể giả mạo IP để né lockout hay làm sai audit log.
+  forward-headers-strategy: native
   # Không bao giờ trả stack trace / message nội bộ cho client (OWASP A05)
   error:
     include-stacktrace: never
@@ -10,6 +13,53 @@ server:
 spring:
   application:
     name: auth-service
+  # Mọi giá trị nhạy cảm đến từ biến môi trường. Default rỗng => app dừng/không kết nối được
+  # thay vì chạy với giá trị "tạm" bị hardcode.
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${POSTGRES_PORT:5432}/${AUTH_DB_NAME:guardgate_auth}
+    username: ${AUTH_DB_USER:auth_service}
+    password: ${AUTH_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema do Flyway quản lý; Hibernate chỉ kiểm tra entity khớp với bảng
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+    web:
+      pageable:
+        max-page-size: 100
+
+guardgate:
+  jwt:
+    issuer: ${JWT_ISSUER:guardgate-auth}
+    audience: ${JWT_AUDIENCE:guardgate}
+    # Base64 của khoá RSA PKCS#8 (DER) hoặc chuỗi PEM. Xem .env.example để sinh khoá.
+    private-key: ${JWT_PRIVATE_KEY:}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:7d}
+  security:
+    max-failed-attempts: ${LOGIN_MAX_FAILED_ATTEMPTS:5}
+    lock-duration: ${LOGIN_LOCK_DURATION:15m}
+    bcrypt-strength: ${BCRYPT_STRENGTH:12}
+  bootstrap-admin:
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  github:
+    api-base-url: https://api.github.com
 
 management:
   endpoints:
