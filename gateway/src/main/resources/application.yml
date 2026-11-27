@@ -48,6 +48,20 @@ guardgate:
   gateway:
     # Số proxy tin cậy đứng trước gateway (D9): 0 khi chạy local, 1 khi sau ingress trên K8s
     trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:0}
+    # Token bucket (D8): replenish-rate token/giây, burst-capacity token tối đa, requested-tokens/request
+    rate-limits:
+      auth-ip:          # login/register/refresh theo IP: ≈10 request/phút
+        replenish-rate: 1
+        burst-capacity: 60
+        requested-tokens: 6
+      ip:               # mọi request theo IP
+        replenish-rate: 20
+        burst-capacity: 40
+        requested-tokens: 1
+      user:             # request đã xác thực theo user (sub)
+        replenish-rate: 10
+        burst-capacity: 20
+        requested-tokens: 1
     cors:
       allowed-origins: ${CORS_ALLOWED_ORIGINS:}
     jwt:

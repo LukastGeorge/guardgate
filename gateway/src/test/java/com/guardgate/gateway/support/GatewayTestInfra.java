@@ -43,4 +43,19 @@ public final class GatewayTestInfra {
         registry.add("GATEWAY_RESPONSE_TIMEOUT", () -> "1s");
         registry.add("CORS_ALLOWED_ORIGINS", () -> ALLOWED_ORIGIN);
     }
+
+    /** Giới hạn rất cao: test chức năng (gửi hàng chục request từ cùng IP) không bị 429 ngoài ý muốn. */
+    public static void registerRelaxedRateLimits(DynamicPropertyRegistry registry) {
+        for (String policy : new String[] {"auth-ip", "ip", "user"}) {
+            registerRateLimit(registry, policy, 1000, 2000, 1);
+        }
+    }
+
+    public static void registerRateLimit(DynamicPropertyRegistry registry, String policy,
+                                         int replenishRate, int burstCapacity, int requestedTokens) {
+        String prefix = "guardgate.gateway.rate-limits." + policy + ".";
+        registry.add(prefix + "replenish-rate", () -> replenishRate);
+        registry.add(prefix + "burst-capacity", () -> burstCapacity);
+        registry.add(prefix + "requested-tokens", () -> requestedTokens);
+    }
 }

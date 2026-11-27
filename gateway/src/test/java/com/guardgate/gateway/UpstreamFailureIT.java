@@ -32,6 +32,7 @@ class UpstreamFailureIT {
     @DynamicPropertySource
     static void brokenUpstreams(DynamicPropertyRegistry registry) {
         GatewayTestInfra.register(registry, "http://localhost:" + CLOSED_PORT);
+        GatewayTestInfra.registerRelaxedRateLimits(registry);
     }
 
     @BeforeEach

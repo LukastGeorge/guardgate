@@ -34,6 +34,7 @@ public abstract class AbstractGatewayIT {
     @DynamicPropertySource
     static void gatewayProperties(DynamicPropertyRegistry registry) {
         GatewayTestInfra.register(registry, GatewayTestInfra.downstreamUrl());
+        GatewayTestInfra.registerRelaxedRateLimits(registry);
     }
 
     @BeforeEach
