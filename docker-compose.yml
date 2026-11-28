@@ -43,7 +43,7 @@ services:
       - backend
 
   redis:
-    image: redis:7.4.6-alpine
+    image: redis:8.12.0-alpine
     container_name: guardgate-redis
     restart: unless-stopped
     environment:
