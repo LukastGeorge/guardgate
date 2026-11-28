@@ -12,6 +12,8 @@ image:
   registry: guardgate
   tag: dev
   pullPolicy: IfNotPresent
+  # Secret kiểu dockerconfigjson (tạo ngoài chart) để kéo image từ registry private, vd. GHCR trong CI
+  pullSecrets: []
 
 # securityContext dùng chung cho mọi pod/container ứng dụng (uid 10001 trùng USER trong Dockerfile)
 podSecurityContext:

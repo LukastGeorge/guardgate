@@ -4,6 +4,11 @@
 # Dùng: bash scripts/k8s/up.sh [env-file]          (mặc định .env)
 # Sau đó: bash scripts/smoke-test.sh http://guardgate.localhost:8088
 #
+# Chế độ registry (CI staging): KHÔNG build — deploy đúng image đã ký, ghim theo digest:
+#   GG_IMAGE_REGISTRY=ghcr.io/<owner>  GG_IMAGE_TAG=<sha>
+#   GG_IMAGE_DIGESTS="auth-service=sha256:...,gateway=sha256:...,demo-service=sha256:..."   (bắt buộc đủ 3)
+#   GG_PULL_SECRET_FILE=<file .dockerconfigjson>   (tuỳ chọn: registry private)
+#
 # Kubeconfig của cluster nằm riêng ở .tools/kubeconfig (gitignored): KHÔNG sửa ~/.kube/config của bạn.
 #   export KUBECONFIG=.tools/kubeconfig   # để dùng kubectl với cluster này
 set -euo pipefail
@@ -42,19 +47,33 @@ fi
 chmod 600 "$KUBECONFIG" 2>/dev/null || true
 kubectl wait --for=condition=Ready node --all --timeout=120s >/dev/null
 
-# 2. Image: tag = SHA commit (thêm -dirty nếu có thay đổi chưa commit) -> đổi code là đổi tag -> pod được tạo lại
-TAG=$(git rev-parse --short=12 HEAD)
-[[ -n "$(git status --porcelain)" ]] && TAG="$TAG-dirty"
-echo "==> building images (tag $TAG)"
-images=()
-for app in "${APPS[@]}"; do
-  case $app in auth-service) port=8081;; demo-service) port=8082;; gateway) port=8080;; esac
-  docker build -q -t "guardgate/guardgate-$app:$TAG" \
-    --build-arg MODULE="$app" --build-arg PORT="$port" --build-arg REVISION="$(git rev-parse HEAD)" . >/dev/null
-  images+=("guardgate/guardgate-$app:$TAG")
-done
-echo "==> importing images into k3d"
-"$K3D" image import -c "$CLUSTER" "${images[@]}"
+helm_image_args=()
+if [[ -n "${GG_IMAGE_REGISTRY:-}" ]]; then
+  # 2a. Registry: mọi app phải có digest hợp lệ — thiếu một cái là dừng (không âm thầm deploy theo tag)
+  TAG=${GG_IMAGE_TAG:?GG_IMAGE_TAG is required with GG_IMAGE_REGISTRY}
+  declare -A digest=()
+  IFS=',' read -ra pairs <<<"${GG_IMAGE_DIGESTS:?GG_IMAGE_DIGESTS is required with GG_IMAGE_REGISTRY}"
+  for pair in "${pairs[@]}"; do digest[${pair%%=*}]=${pair#*=}; done
+  helm_image_args+=(--set "image.registry=$GG_IMAGE_REGISTRY")
+  for app in "${APPS[@]}"; do
+    [[ "${digest[$app]:-}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "FAIL: no valid digest for $app in GG_IMAGE_DIGESTS"; exit 1; }
+    helm_image_args+=(--set "apps.$app.digest=${digest[$app]}")
+  done
+  echo "==> deploying $GG_IMAGE_REGISTRY images (tag $TAG) pinned by digest"
+else
+  # 2b. Local: tag = SHA commit (thêm -dirty nếu có thay đổi chưa commit) -> đổi code là đổi tag -> pod được tạo lại
+  TAG=$(git rev-parse --short=12 HEAD)
+  [[ -n "$(git status --porcelain)" ]] && TAG="$TAG-dirty"
+  echo "==> building images (tag $TAG)"
+  images=()
+  for app in "${APPS[@]}"; do
+    case $app in auth-service) port=8081;; demo-service) port=8082;; gateway) port=8080;; esac
+    docker build -q -t "guardgate/guardgate-$app:$TAG"       --build-arg MODULE="$app" --build-arg PORT="$port" --build-arg REVISION="$(git rev-parse HEAD)" . >/dev/null
+    images+=("guardgate/guardgate-$app:$TAG")
+  done
+  echo "==> importing images into k3d"
+  "$K3D" image import -c "$CLUSTER" "${images[@]}"
+fi
 
 # 3. Namespace từ CHÍNH template của chart (một nguồn sự thật cho nhãn Pod Security "restricted")
 helm template "$RELEASE" charts/guardgate --namespace "$NS" --set namespace.create=true \
@@ -62,13 +81,18 @@ helm template "$RELEASE" charts/guardgate --namespace "$NS" --set namespace.crea
 
 # 4. Secret theo component (không in giá trị)
 bash scripts/k8s/create-secrets.sh "$ENV_FILE" "$NS"
+if [[ -n "${GG_PULL_SECRET_FILE:-}" ]]; then
+  kubectl -n "$NS" create secret generic registry-pull --type=kubernetes.io/dockerconfigjson     --from-file=.dockerconfigjson="$GG_PULL_SECRET_FILE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  helm_image_args+=(--set "image.pullSecrets[0]=registry-pull")
+  echo "secret/registry-pull applied"
+fi
 
 # 5. Cấu hình không bí mật lấy từ .env (email admin bootstrap) — đọc đúng một key, không source file
 admin_email=$(sed -n 's/^BOOTSTRAP_ADMIN_EMAIL=//p' "$ENV_FILE" | tail -1 | tr -d '\r"'"'")
 
 echo "==> helm upgrade --install"
 helm upgrade --install "$RELEASE" charts/guardgate --namespace "$NS" \
-  --set image.tag="$TAG" \
+  --set image.tag="$TAG" "${helm_image_args[@]}" \
   --set-string "apps.auth-service.env.BOOTSTRAP_ADMIN_EMAIL=$admin_email" \
   --wait --timeout 6m
 

@@ -1,6 +1,8 @@
 # CI/CD DevSecOps của GuardGate.
 #   build + test → SAST (Semgrep) → secrets (Gitleaks) → dependencies (Trivy fs) → image + Trivy image
-#   → [chỉ main] publish GHCR + SBOM + cosign → staging (docker compose) → DAST (OWASP ZAP baseline)
+#   + Helm chart gates (lint, kubeconform, policy, trivy config)
+#   → [chỉ main] publish GHCR + SBOM + cosign → staging (k3d + Helm, đúng digest đã verify)
+#   → smoke + NetworkPolicy runtime → DAST (OWASP ZAP baseline)
 # Pipeline FAIL khi có lỗ hổng HIGH/CRITICAL. Không bước quét nào được phép "|| true" / continue-on-error.
 #
 # Supply chain của chính pipeline: mọi action pin theo commit SHA (tag có thể bị trỏ lại sang code khác),
@@ -26,6 +28,7 @@ env:
   GITLEAKS_IMAGE: zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854
   # v0.76.2: release immutable sau sự cố supply-chain của Trivy (3/2026); v0.27–v0.69.1 đã bị gỡ khỏi GitHub
   TRIVY_VERSION: v0.76.2
+  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
 
 jobs:
   build-test:
@@ -152,9 +155,37 @@ jobs:
           bash scripts/tests/workflow-policy.test.sh
           bash scripts/tests/compose-secrets.test.sh
 
+  helm:
+    name: Helm chart gates (lint, kubeconform, policy, trivy config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Helm (official release, pinned SHA256)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/helm.tgz" https://get.helm.sh/helm-v4.2.2-linux-amd64.tar.gz
+          echo "9adafecab4d406853bba163a70e9f104f47dbbf65ce24b7653bae7e36150bcb6  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP" linux-amd64/helm
+          mv "$RUNNER_TEMP/linux-amd64/helm" "$RUNNER_TEMP/bin/helm"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Chart policy (helm lint + kubeconform -strict + securityContext/secret/network rules)
+        run: bash scripts/tests/helm-policy.test.sh
+      - name: The policy test itself rejects a deliberately insecure values file
+        run: |
+          if bash scripts/tests/helm-policy.test.sh scripts/tests/testdata/helm-bad-values.yaml; then
+            echo "::error::helm-policy test accepted helm-bad-values.yaml"; exit 1
+          fi
+      - name: Trivy config on the chart (fail on HIGH/CRITICAL)
+        run: docker run --rm -v "$PWD/charts:/charts:ro" "$TRIVY_IMAGE" config --severity HIGH,CRITICAL --exit-code 1 /charts/guardgate
+      - name: create-secrets.sh never leaks values
+        run: bash scripts/tests/create-secrets.test.sh
+
   image:
     name: Image ${{ matrix.module }} (build + verify + Trivy)
-    needs: [build-test, semgrep, gitleaks, trivy-fs, pin-check]
+    needs: [build-test, semgrep, gitleaks, trivy-fs, pin-check, helm]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -277,17 +308,19 @@ jobs:
           path: sbom-${{ matrix.module }}.cdx.json
 
   staging-dast:
-    name: Staging (compose) + smoke + OWASP ZAP baseline
+    name: Staging (k3d + Helm) + smoke + netpol + OWASP ZAP baseline
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: read
     env:
       IMAGE_TAG: ${{ github.sha }}
       ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+      KUBECONFIG: ${{ github.workspace }}/.tools/kubeconfig
+      BASE_URL: http://guardgate.localhost:8088
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -299,19 +332,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
-      - name: Verify image signatures before deploying
+      # Verify theo tag rồi deploy CHÍNH digest mà cosign đã verify (không resolve tag lần hai -> hết TOCTOU)
+      - name: Verify image signatures and capture the verified digests
         run: |
+          digests=""
           for m in auth-service gateway demo-service; do
-            cosign verify "$IMAGE_REGISTRY/guardgate-$m:$IMAGE_TAG" \
+            out=$(cosign verify "$IMAGE_REGISTRY/guardgate-$m:$IMAGE_TAG" \
               --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
-            echo "signature OK: guardgate-$m"
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com)
+            d=$(jq -r '[.[].critical.image["docker-manifest-digest"]] | unique | if length == 1 then .[0] else "" end' <<<"$out")
+            if [[ ! "$d" =~ ^sha256:[0-9a-f]{64}$ ]]; then echo "::error::no single verified digest for $m"; exit 1; fi
+            digests+="${digests:+,}$m=$d"
+            echo "signature OK: guardgate-$m@$d"
           done
+          echo "GG_IMAGE_DIGESTS=$digests" >> "$GITHUB_ENV"
+      - name: Install Helm and k3d (official releases, pinned SHA256)
+        run: |
+          mkdir -p .tools "$RUNNER_TEMP/bin"
+          curl -fsSLo "$RUNNER_TEMP/helm.tgz" https://get.helm.sh/helm-v4.2.2-linux-amd64.tar.gz
+          echo "9adafecab4d406853bba163a70e9f104f47dbbf65ce24b7653bae7e36150bcb6  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP" linux-amd64/helm
+          mv "$RUNNER_TEMP/linux-amd64/helm" "$RUNNER_TEMP/bin/helm"
+          curl -fsSLo .tools/k3d https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64
+          echo "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  .tools/k3d" | sha256sum -c -
+          chmod +x .tools/k3d
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Ephemeral secrets for this run only
         run: bash scripts/ci-staging-env.sh > .env
-      - name: Deploy staging
-        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-build --wait --wait-timeout 300
-      - name: Postgres/Redis must not be reachable from outside the compose network
+      - name: Registry pull secret for the cluster (short-lived GITHUB_TOKEN, packages:read)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          umask 077
+          auth=$(printf '%s:%s' "$GITHUB_ACTOR" "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$auth" > "$RUNNER_TEMP/pull.json"
+      - name: Deploy staging on k3d (images pinned by verified digest)
+        env:
+          GG_PULL_SECRET_FILE: ${{ runner.temp }}/pull.json
+        run: |
+          GG_IMAGE_REGISTRY="$IMAGE_REGISTRY" GG_IMAGE_TAG="$IMAGE_TAG" GG_IMAGE_DIGESTS="$GG_IMAGE_DIGESTS" \
+            bash scripts/k8s/up.sh .env
+          rm -f "$GG_PULL_SECRET_FILE"
+      - name: Running workloads use exactly the verified digests
+        run: |
+          for pair in ${GG_IMAGE_DIGESTS//,/ }; do
+            m=${pair%%=*} d=${pair#*=}
+            img=$(kubectl -n guardgate get deploy "$m" -o jsonpath='{.spec.template.spec.containers[0].image}')
+            if [[ "$img" != *"@$d" ]]; then echo "::error::$m runs $img, expected digest $d"; exit 1; fi
+            echo "$m: $img"
+          done
+      - name: Postgres/Redis must not be reachable from the host
         run: |
           # bash /dev/tcp có sẵn trong bash (không phụ thuộc nc: thiếu nc thì check cũ "pass" mà không kiểm tra gì)
           for port in 5432 6379; do
@@ -320,14 +391,16 @@ jobs:
             fi
             echo "port $port: not reachable from the host (OK)"
           done
-      - name: Smoke test through the gateway
-        run: bash scripts/smoke-test.sh http://localhost:8080
+      - name: Smoke test through Traefik ingress and the gateway
+        run: bash scripts/smoke-test.sh "$BASE_URL"
+      - name: NetworkPolicy runtime checks
+        run: bash scripts/tests/k8s-netpol.test.sh
       - name: OWASP ZAP baseline (passive scan)
         run: |
           mkdir -p zap && cp .zap/rules.tsv zap/ && chmod 777 zap
           rc=0
-          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
-            zap-baseline.py -t http://localhost:8080 -c rules.tsv -J zap-report.json -r zap-report.html -I || rc=$?
+          docker run --rm --network host --add-host guardgate.localhost:127.0.0.1 -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t "$BASE_URL" -c rules.tsv -J zap-report.json -r zap-report.html -I || rc=$?
           echo "zap-baseline exit code: $rc"
           # -I: không fail vì WARN; exit 3 = ZAP tự lỗi → FAIL. Quyết định cuối do zap-gate.sh (đọc report).
           if [ "$rc" -eq 3 ]; then echo "::error::ZAP failed to run"; exit 1; fi
@@ -339,9 +412,11 @@ jobs:
         with:
           name: zap-report
           path: zap/
-      - name: Container logs on failure
+      - name: Cluster state on failure
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml logs --no-color --tail 200
+        run: |
+          kubectl -n guardgate get pods,events -o wide || true
+          for d in auth-service gateway demo-service; do kubectl -n guardgate logs "deploy/$d" --tail 100 || true; done
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml down -v
+        run: bash scripts/k8s/down.sh

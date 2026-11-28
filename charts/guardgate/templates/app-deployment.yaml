@@ -26,6 +26,12 @@ spec:
       # Tắt biến môi trường kiểu Docker-links (vd. AUTH_SERVICE_PORT=tcp://10.x:8081) mà K8s tự bơm vào:
       # chúng TRÙNG TÊN với biến cấu hình của app (AUTH_SERVICE_PORT, REDIS_PORT...) và làm app khởi động sai.
       enableServiceLinks: false
+      {{- with $.Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       {{- with $app.waitFor }}

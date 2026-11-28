@@ -39,4 +39,27 @@ check "trivy-fs keeps the HIGH/CRITICAL threshold in SARIF mode" 'grep -q "limit
 check "port exposure check does not depend on nc" '! grep -q "nc -z" <<<"$staging"'
 check "port exposure check uses bash /dev/tcp" 'grep -q "/dev/tcp/127.0.0.1" <<<"$staging"'
 
+# ---- GĐ5: chart Helm + staging trên k3d ----
+helm_job=$(job helm)
+image_job=$(job image)
+check "helm job runs the chart policy test" 'grep -q "scripts/tests/helm-policy.test.sh" <<<"$helm_job"'
+check "helm job proves the policy test rejects bad values" 'grep -q "helm-bad-values.yaml" <<<"$helm_job"'
+check "helm job runs a blocking trivy config scan" 'grep -q "config" <<<"$helm_job" && grep -qE -- "--exit-code 1" <<<"$helm_job"'
+check "helm binary is verified against a pinned SHA256" 'grep -qE "[0-9a-f]{64}  +[^ ]*helm" <<<"$helm_job" && grep -q "sha256sum -c" <<<"$helm_job"'
+check "image builds wait for the helm gate" 'grep -E "needs: \[.*\bhelm\b.*\]" <<<"$image_job" >/dev/null'
+
+# Staging = k3d + Helm (không còn docker compose), k3d binary có checksum pin
+check "staging deploys with scripts/k8s/up.sh" 'grep -q "scripts/k8s/up.sh" <<<"$staging"'
+check "staging no longer uses docker compose" '! grep -qE "docker compose .* up" <<<"$staging"'
+check "k3d binary is verified against a pinned SHA256" 'grep -qE "[0-9a-f]{64}  *\.tools/k3d" <<<"$staging" && grep -q "sha256sum -c" <<<"$staging"'
+
+# GĐ4 minor #5 (TOCTOU): deploy ĐÚNG digest mà cosign đã verify, không deploy lại theo tag
+verify_line=$(line_of "$staging" 'cosign verify')
+deploy_line=$(line_of "$staging" 'scripts/k8s/up.sh')
+check "cosign verify runs before deploy" '[[ -n "$verify_line" && -n "$deploy_line" && $verify_line -lt $deploy_line ]]'
+check "verified digest is taken from cosign output" 'grep -q "docker-manifest-digest" <<<"$staging"'
+check "deploy pins every app by the verified digest" 'grep -q "GG_IMAGE_DIGESTS" <<<"$staging"'
+check "staging runs the runtime network policy test" 'grep -q "scripts/tests/k8s-netpol.test.sh" <<<"$staging"'
+check "staging tears the cluster down" 'grep -q "scripts/k8s/down.sh" <<<"$staging"'
+
 [[ $failures -eq 0 ]] && echo "workflow policy tests passed" || { echo "$failures policy violation(s)"; exit 1; }
