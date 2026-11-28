@@ -277,7 +277,7 @@ erDiagram
 
 **Nghiệm thu:** chạy 3 service + compose, rồi chạy `scripts/smoke-test.sh` qua gateway. Script phải xác nhận: đăng ký → đăng nhập → gọi demo user 200, demo admin 403, admin 200 → logout làm token cũ bị 401 → đăng nhập liên tục bị 429 → không có token bị 401 → header giả `X-Forwarded-For` không né được rate limit.
 
-### Giai đoạn 4: Docker + CI/CD DevSecOps ✅ Đã code (phần chạy trên `main` chờ lần chạy đầu)
+### Giai đoạn 4: Docker + CI/CD DevSecOps ✅ Đã xong (run đầu tiên trên `main` xanh toàn bộ, 2026-11-28)
 Plan: `docs/superpowers/plans/2026-11-28-phase4-docker-cicd.md`. Kết quả chính:
 - CI trên nhánh tính năng xanh 8/8 job; image 99–136 MB, uid 10001, 0 CVE HIGH/CRITICAL (Trivy 0.76.2).
 - **Phát hiện khi làm:** quét pom báo 0 CVE nhưng quét image thấy hàng chục (jackson RCE, Tomcat, Netty…) → nâng
