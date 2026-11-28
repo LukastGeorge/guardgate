@@ -8,7 +8,7 @@
 ARG RUNTIME_IMAGE=eclipse-temurin:21-jre-alpine
 
 # ---------- 1. Build ----------
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 ARG MODULE
 WORKDIR /workspace
 
