@@ -1,0 +1,3 @@
+{"@programName":"ZAP","@version":"2.16.1","site":[{"@name":"http://localhost:8080","alerts":[
+ {"pluginid":"10021","alert":"X-Content-Type-Options Header Missing","name":"X-Content-Type-Options Header Missing","riskcode":"1","confidence":"2","riskdesc":"Low (Medium)"},
+ {"pluginid":"40012","alert":"Cross Site Scripting (Reflected)","name":"Cross Site Scripting (Reflected)","riskcode":"3","confidence":"2","riskdesc":"High (Medium)"}]}]}

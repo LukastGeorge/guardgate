@@ -9,7 +9,7 @@ set -uo pipefail
 export MSYS_NO_PATHCONV=1
 
 TARGET=$(cd "${1:-.}" && { pwd -W 2>/dev/null || pwd; })
-IMAGE=${GITLEAKS_IMAGE:-zricethezav/gitleaks:v8.28.0}
+IMAGE=${GITLEAKS_IMAGE:-zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854}
 
 output=$(docker run --rm -v "$TARGET:/repo:ro" \
   -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
