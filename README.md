@@ -13,6 +13,8 @@ guardgate/
 ├── gateway/                 # :8080 – Spring Cloud Gateway, xác thực JWT, rate limit
 ├── demo-service/            # :8082 – service mẫu (public / user / admin)
 ├── infra/postgres/init/     # Script tạo DB + user riêng cho auth-service
+├── charts/guardgate/        # Helm chart (PSA restricted, NetworkPolicy, Secret theo component)
+├── scripts/k8s/             # up.sh / down.sh (k3d), create-secrets.sh
 ├── docker-compose.yml       # Postgres + Redis cho môi trường local
 └── .env.example             # Mẫu biến môi trường (copy thành .env)
 ```
@@ -101,7 +103,8 @@ flowchart LR
     E[pin-check + actionlint<br/>+ risk-acceptance guard] --> F
     F[image x3: build →<br/>verify-image → Trivy image] --> G{main?}
     G -- có --> H[publish GHCR<br/>SBOM + cosign sign/attest]
-    H --> I[staging: cosign verify →<br/>compose → smoke test]
+    E2[Helm gates<br/>lint, kubeconform, policy, trivy config] --> F
+    H --> I[staging k3d + Helm:<br/>cosign verify → deploy đúng digest<br/>→ smoke + NetworkPolicy test]
     I --> J[OWASP ZAP baseline<br/>FAIL nếu có High]
 ```
 
@@ -113,6 +116,8 @@ flowchart LR
 | Secret + cấu hình | Trivy fs (offline) | HIGH/CRITICAL có bản vá (dependency bắc cầu được kiểm ở bước image) |
 | Image | `verify-image.sh` + Trivy image | chạy root, có secret/source, thiếu healthcheck; CVE HIGH/CRITICAL (quét lại đúng digest được publish, trước khi ký) |
 | Chuỗi cung ứng pipeline | pin-check, actionlint | action không pin theo SHA, workflow lỗi |
+| Helm chart | helm lint, kubeconform `-strict`, `helm-policy.test.sh`, Trivy config | schema sai, container thiếu hardening, Secret trong manifest hoặc sai pod, thiếu NetworkPolicy, misconfig HIGH/CRITICAL |
+| Staging | cosign verify, smoke test, `k8s-netpol.test.sh` | image chưa ký hoặc khác digest, lớp bảo vệ nào đó hỏng trên cluster thật |
 | DAST | OWASP ZAP baseline | alert High, **hoặc** thiếu report |
 
 Kết quả Semgrep và Trivy fs được đẩy lên tab **Security → Code scanning** (SARIF).
@@ -135,6 +140,60 @@ làm CI fail nếu code bắt đầu dùng tính năng bị ảnh hưởng (Xslt
 **Bài học chuỗi cung ứng:** đầu năm 2026 Trivy bị tấn công supply chain (release bị xoá, tag của `trivy-action`
 bị trỏ sang mã đánh cắp credential). Vì vậy mọi action được pin theo **commit SHA**, mọi image công cụ pin theo
 **digest**, và commit `trivy-action` → `setup-trivy` → script cài đặt đều đã được kiểm tra chữ ký và ngày tạo.
+
+## Kubernetes (Helm + k3d)
+
+Chart `charts/guardgate` deploy toàn hệ thống lên Kubernetes, **an toàn theo mặc định**:
+
+```mermaid
+flowchart LR
+    client((client)) -->|guardgate.localhost:8088| traefik[Traefik<br/>kube-system]
+    subgraph ns[namespace guardgate · PSA restricted · default-deny]
+      traefik -->|8080| gw[gateway]
+      gw -->|8081| auth[auth-service]
+      gw -->|8082| demo[demo-service]
+      gw -->|6379| redis[(redis)]
+      demo -->|8081 JWKS| auth
+      auth -->|5432| pg[(postgres)]
+      auth -->|6379| redis
+    end
+```
+
+Mỗi mũi tên là một rule NetworkPolicy. Mọi kết nối khác, kể cả ra Internet, đều bị chặn.
+
+| Lớp bảo vệ | Cách làm | Kiểm chứng |
+|---|---|---|
+| Pod Security | namespace `enforce: restricted`; mọi container non-root, root FS chỉ đọc, `drop: [ALL]`, seccomp `RuntimeDefault`, không mount token ServiceAccount | `helm-policy.test.sh`; cluster thật: 0 vi phạm PSA |
+| Mạng | `default-deny` + DNS; mỗi workload một policy sinh từ **đồ thị gọi nhau** (ingress/egress không thể lệch nhau) | `k8s-netpol.test.sh`: 26 kiểm tra từ pod thật + pod "người lạ" |
+| Secret (D21) | mỗi component một Secret, tạo từ `.env` bằng `scripts/k8s/create-secrets.sh`; chart **không chứa secret nào**; gateway/demo không thấy khoá ký JWT | allow-list Secret theo workload trong `helm-policy.test.sh` |
+| Điểm vào | một Ingress duy nhất, chỉ trỏ tới gateway | `helm-policy.test.sh` |
+| Image | tag = SHA commit (cấm `latest`); CI ghim thêm **digest đã cosign verify** | `workflow-policy.test.sh` |
+
+### Chạy trên máy (k3d)
+
+Cần Docker, `kubectl`, `helm` và [k3d](https://k3d.io) (đặt binary vào `.tools/` hoặc trong PATH, nhớ kiểm tra SHA256
+theo file `checksums.txt` của release).
+
+```bash
+bash scripts/k8s/up.sh            # cluster + build/import image + Secret từ .env + helm --wait (~3 phút)
+bash scripts/smoke-test.sh http://guardgate.localhost:8088
+bash scripts/tests/k8s-netpol.test.sh
+export KUBECONFIG=.tools/kubeconfig   # kubeconfig riêng, không đụng ~/.kube/config
+kubectl -n guardgate get pods
+bash scripts/k8s/down.sh          # xoá cluster (kèm dữ liệu)
+```
+
+**Kiểm tra tĩnh, không cần cluster:** `bash scripts/tests/helm-policy.test.sh` chạy helm lint, kubeconform `-strict` và các
+luật bảo mật bằng jq. CI còn chạy thêm `trivy config`.
+
+**Điều rút ra khi deploy thật:**
+- K8s tự bơm biến `AUTH_SERVICE_PORT=tcp://…`, trùng tên với biến cấu hình của app → đặt `enableServiceLinks: false`.
+- K8s không có `depends_on` → thêm init container `wait-for-deps`. Nhờ đó lần dựng cluster mới không có restart nào.
+- Traefik mặc định bỏ `X-Forwarded-For` mà client tự gửi lên. Thêm vào `GATEWAY_TRUSTED_PROXIES=1` của gateway, ta có
+  hai lớp chống giả IP. Smoke test chứng minh điều này qua Ingress.
+
+**Production:** thay Postgres/Redis trong chart bằng dịch vụ managed (D17), và quản lý Secret bằng External Secrets hoặc
+Sealed Secrets thay cho `create-secrets.sh`.
 
 ## Auth Service API
 

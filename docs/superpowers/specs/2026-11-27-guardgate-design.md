@@ -301,7 +301,7 @@ flowchart LR
     F --> G[Trivy image]
     G --> H{branch main?}
     H -- yes --> I[push GHCR<br/>+ SBOM, cosign]
-    I --> J[deploy staging<br/>kind + Helm / compose]
+    I --> J[deploy staging<br/>k3d + Helm, đúng digest đã verify]
     J --> K[OWASP ZAP baseline]
     H -- no / PR --> L[stop]
 ```
@@ -309,13 +309,26 @@ flowchart LR
 - **Cổng chặn:** Semgrep có kết quả mức ERROR, Gitleaks phát hiện bất kỳ leak nào, Trivy có HIGH/CRITICAL (`--exit-code 1 --ignore-unfixed`), ZAP có cảnh báo mức High → FAIL. Upload SARIF lên tab Security của GitHub.
 - Quyền workflow tối thiểu (`permissions:` theo từng job), action pin theo SHA (D18), Dependabot cho Maven, Docker và Actions.
 
-### Giai đoạn 5: Helm + Kubernetes 🟡 Chờ duyệt
+### Giai đoạn 5: Helm + Kubernetes ✅ Hoàn thành (2026-11-28)
 - Chart `charts/guardgate`: 3 Deployment + Service, Postgres/Redis (D17), Ingress (Traefik) **chỉ trỏ tới gateway**.
 - Pod security: `runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault`, namespace gắn nhãn Pod Security Admission `restricted`.
 - NetworkPolicy mặc định deny-all, chỉ mở: ingress→gateway, gateway→auth/demo/redis, auth→postgres/redis, demo→auth (JWKS).
 - Secret: chart dùng `existingSecret`; secret được tạo từ `.env` bằng script (không commit); ghi chú hướng production (External Secrets / Sealed Secrets).
 - Liveness/readiness probe từ Actuator, resource requests/limits, `GATEWAY_TRUSTED_PROXIES=1`.
 - **Nghiệm thu:** `helm lint`, `helm template | kubeconform`, Trivy config scan không có HIGH; deploy lên k3d (D16) và smoke test qua ingress đều pass.
+- **Thực tế (as-built), khác với plan:**
+  - Secret `guardgate-auth` có thêm `REDIS_PASSWORD`, vì auth-service ghi denylist khi logout.
+  - Namespace được tạo **trước** khi cài chart (`namespace.create=false`), vì Secret phải có sẵn trước khi pod chạy.
+    `up.sh` render chính template namespace của chart, nên nhãn PSA chỉ khai báo ở một chỗ.
+  - `enableServiceLinks: false`: biến `*_PORT=tcp://…` mà K8s tự bơm vào trùng tên với cấu hình của app.
+  - Init container `wait-for-deps` (dùng lại image của app, có busybox `nc`) thay cho `depends_on`. Lần dựng cluster mới:
+    0 restart, 0 vi phạm PSA.
+  - Traefik mặc định ghi đè `X-Forwarded-For` của client. Kể cả khi cố tình đặt sai `GATEWAY_TRUSTED_PROXIES=2`, client vẫn
+    không giả được IP (đã thử).
+  - Smoke test: bucket `auth-ip` nạp lại theo mốc giây nguyên, nên bước chống brute force chấp nhận 429 trong 15 lần thử,
+    và bước kiểm tra XFF giả dùng 3 IP khác nhau.
+  - CI staging deploy **đúng digest mà cosign đã verify** (đóng minor #5 của GĐ4). Cluster kéo image từ GHCR bằng token
+    `packages:read` ngắn hạn. Helm và k3d được cài từ release chính thức, SHA256 ghim trong workflow.
 
 ```mermaid
 flowchart TB

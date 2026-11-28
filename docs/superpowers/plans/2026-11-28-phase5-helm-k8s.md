@@ -98,12 +98,12 @@
 - Modify: `.github/workflows/ci.yml` (job `helm` chạy trên mọi nhánh: lint, kubeconform, trivy config, helm-policy test; job `staging-dast` chuyển từ compose sang k3d + Helm, kéo image đã ký theo **digest** từ GHCR — xử lý luôn minor #5 của GĐ4)
 - Modify: `scripts/tests/workflow-policy.test.sh` (staging dùng k3d, deploy theo digest đã cosign verify)
 
-- [ ] **Step 1: Mở rộng `workflow-policy.test.sh`** → FAIL.
-- [ ] **Step 2: Sửa workflow** → policy test + actionlint xanh.
+- [x] **Step 1: Mở rộng `workflow-policy.test.sh`** → FAIL.
+- [x] **Step 2: Sửa workflow** → policy test + actionlint xanh.
 - [ ] **Step 3: Push nhánh** → job `helm` xanh; merge vào main (hỏi user) → `staging-dast` trên k3d xanh (cosign verify, smoke qua ingress, netpol test, ZAP).
 - [ ] **Step 4: Commit**: `ci: helm gates and k3d staging with digest-pinned signed images`
 
 ### Task 6: Tài liệu
 
-- [ ] README: sơ đồ K8s (Ingress → gateway → services, NetworkPolicy), cách chạy `scripts/k8s/up.sh`, cách kiểm tra PSA/NetworkPolicy; spec GĐ5 → trạng thái thực tế, D16/D17/D20/D21 → ✅.
+- [x] README: sơ đồ K8s (Ingress → gateway → services, NetworkPolicy), cách chạy `scripts/k8s/up.sh`, cách kiểm tra PSA/NetworkPolicy; spec GĐ5 → trạng thái thực tế, D16/D17/D20/D21 → ✅.
 - [ ] Commit: `docs: kubernetes deployment guide`
