@@ -1,0 +1,31 @@
+# Dependabot mở PR khi dependency có bản mới hoặc bản vá bảo mật. Mỗi PR vẫn phải qua toàn bộ CI.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      spring:
+        patterns: ["org.springframework*"]
+      jackson:
+        patterns: ["com.fasterxml.jackson*"]
+
+  # Base image trong Dockerfile (eclipse-temurin, maven)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Image trong docker-compose.yml (postgres, redis)
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+
+  # SHA của các GitHub Action (Dependabot cập nhật cả SHA lẫn comment tag)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

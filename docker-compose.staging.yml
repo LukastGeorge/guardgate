@@ -1,0 +1,8 @@
+# Override cho staging (CI): bỏ hẳn cổng Postgres/Redis ra host — chỉ gateway là điểm vào.
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-build --wait
+# Image lấy từ GHCR qua IMAGE_REGISTRY + IMAGE_TAG (commit SHA), đã được cosign verify trước khi deploy.
+services:
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []

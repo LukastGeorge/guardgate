@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Trạng thái: CHỜ DUYỆT.** Dùng các quyết định D14, D15, D18 đang ở trạng thái 🟡 trong spec; cần được chốt trước khi code.
+> **Trạng thái: ĐÃ DUYỆT 2026-11-28** (D14 alpine, D15 compose staging, D18 giữ SBOM + cosign).
 
 **Goal:** Mọi service chạy trong container non-root tối giản; mỗi push/PR đi qua pipeline build → test → SAST → secret scan → dependency scan → image scan → (main) push + ký → staging → DAST. Pipeline FAIL khi có lỗ hổng HIGH/CRITICAL.
 

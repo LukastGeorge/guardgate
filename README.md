@@ -34,7 +34,23 @@ docker compose up -d --wait                       # Postgres + Redis
 Trên Windows PowerShell dùng `.\mvnw.cmd` và đặt tham số `-D...` trong dấu nháy kép.
 Nếu cổng 5432 đã bị Postgres cài sẵn trên máy chiếm, đặt `POSTGRES_PORT=5433` trong `.env`.
 
-### Chạy cả hệ thống
+### Chạy bằng Docker (cả hệ thống)
+
+```bash
+docker compose up -d --build --wait     # Postgres, Redis, auth-service, demo-service, gateway
+bash scripts/smoke-test.sh              # kiểm tra end-to-end qua http://localhost:8080
+docker compose down                     # dừng (giữ dữ liệu); thêm -v để xoá cả volume
+```
+
+Mỗi service chạy trong container **non-root** (uid 10001), filesystem **chỉ đọc** (chỉ `/tmp` ghi được, trên RAM),
+bỏ mọi Linux capability, cấm leo quyền và giới hạn RAM. Về **ứng dụng**, chỉ gateway publish cổng ra host
+(`127.0.0.1:8080`); auth-service và demo-service chỉ truy cập được trong mạng Docker. File compose mặc định vẫn
+publish Postgres/Redis trên `127.0.0.1` để dev chạy app bằng Maven; staging (`docker-compose.staging.yml`) bỏ hẳn
+hai cổng này. Mỗi container chỉ nhận đúng biến môi trường nó cần: gateway không giữ khoá ký JWT hay mật khẩu DB
+(kiểm tra bởi `scripts/tests/compose-secrets.test.sh`). Kiểm tra một image:
+`bash scripts/verify-image.sh guardgate/guardgate-gateway:dev`.
+
+### Chạy từng service bằng Maven (phát triển)
 
 Mỗi service một terminal; profile `local` đọc `.env` ở thư mục gốc:
 
@@ -71,6 +87,54 @@ Gateway xác thực JWT (JWKS của auth-service + denylist Redis), rate limit b
 (theo IP, theo IP cho các endpoint đăng nhập, theo user), thay `X-Forwarded-*` của client bằng giá trị thật,
 áp CORS allow-list, giới hạn body 1 MB, timeout 5 giây, và trả mọi lỗi dạng `application/problem+json`.
 Các service phía sau vẫn tự xác thực lại JWT (defense in depth).
+
+## CI/CD DevSecOps
+
+[![CI](https://github.com/LukastGeorge/guardgate/actions/workflows/ci.yml/badge.svg)](https://github.com/LukastGeorge/guardgate/actions/workflows/ci.yml)
+
+```mermaid
+flowchart LR
+    A[build + test<br/>unit + Testcontainers] --> F
+    B[Semgrep SAST] --> F
+    C[Gitleaks<br/>toàn bộ lịch sử] --> F
+    D[Trivy fs<br/>secret, misconfig] --> F
+    E[pin-check + actionlint<br/>+ risk-acceptance guard] --> F
+    F[image x3: build →<br/>verify-image → Trivy image] --> G{main?}
+    G -- có --> H[publish GHCR<br/>SBOM + cosign sign/attest]
+    H --> I[staging: cosign verify →<br/>compose → smoke test]
+    I --> J[OWASP ZAP baseline<br/>FAIL nếu có High]
+```
+
+| Cổng chặn | Công cụ | FAIL khi |
+|---|---|---|
+| Test | JUnit, Mockito, Testcontainers | bất kỳ test nào đỏ |
+| SAST | Semgrep (`p/java`, `p/owasp-top-ten`, `p/secrets`) | finding mức ERROR |
+| Secret | Gitleaks (toàn bộ lịch sử git) | có leak, **hoặc** quét 0 commit / git lỗi |
+| Secret + cấu hình | Trivy fs (offline) | HIGH/CRITICAL có bản vá (dependency bắc cầu được kiểm ở bước image) |
+| Image | `verify-image.sh` + Trivy image | chạy root, có secret/source, thiếu healthcheck; CVE HIGH/CRITICAL (quét lại đúng digest được publish, trước khi ký) |
+| Chuỗi cung ứng pipeline | pin-check, actionlint | action không pin theo SHA, workflow lỗi |
+| DAST | OWASP ZAP baseline | alert High, **hoặc** thiếu report |
+
+Kết quả Semgrep và Trivy fs được đẩy lên tab **Security → Code scanning** (SARIF).
+
+**Chạy đúng bộ quét của CI trên máy trước khi push:** `bash scripts/security-scan.sh`
+
+**Xác minh image đã được ký bởi pipeline của repo này** (keyless, Sigstore):
+
+```bash
+cosign verify ghcr.io/lukastgeorge/guardgate-gateway:latest \
+  --certificate-identity "https://github.com/LukastGeorge/guardgate/.github/workflows/ci.yml@refs/heads/main" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-attestation --type cyclonedx ... # SBOM CycloneDX đính kèm image (cùng tham số identity)
+```
+
+**Chấp nhận rủi ro có thời hạn:** `.trivyignore.yaml` liệt kê 3 CVE của Spring Framework 6.2 chỉ được vá ở 7.x
+(Spring Boot 4), kèm lý do không khai thác được và ngày hết hạn `2027-02-26`. `scripts/check-risk-acceptance.sh`
+làm CI fail nếu code bắt đầu dùng tính năng bị ảnh hưởng (XsltView, SSE, RouterFunction).
+
+**Bài học chuỗi cung ứng:** đầu năm 2026 Trivy bị tấn công supply chain (release bị xoá, tag của `trivy-action`
+bị trỏ sang mã đánh cắp credential). Vì vậy mọi action được pin theo **commit SHA**, mọi image công cụ pin theo
+**digest**, và commit `trivy-action` → `setup-trivy` → script cài đặt đều đã được kiểm tra chữ ký và ngày tạo.
 
 ## Auth Service API
 

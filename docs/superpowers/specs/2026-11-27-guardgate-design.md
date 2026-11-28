@@ -134,7 +134,7 @@ sequenceDiagram
 
 ## 4. Quyết định thiết kế
 
-Trạng thái: ✅ đã chốt (D5–D13 được duyệt 2026-11-27) · 🟡 **đề xuất, cần bàn**.
+Trạng thái: ✅ đã chốt (D5–D13 duyệt 2026-11-27; D14, D15, D18 duyệt 2026-11-28) · 🟡 **đề xuất, cần bàn**.
 
 | # | Quyết định | Lý do / Đánh đổi | |
 |---|---|---|---|
@@ -151,11 +151,11 @@ Trạng thái: ✅ đã chốt (D5–D13 được duyệt 2026-11-27) · 🟡 **
 | D11 | Không tạo module dùng chung (`common`); chấp nhận trùng lặp nhỏ (ProblemDetail writer, role converter) | Gateway là reactive còn service khác là servlet, API khác nhau; YAGNI | ✅ |
 | D12 | CORS chỉ cấu hình ở gateway, allow-list từ `CORS_ALLOWED_ORIGINS`, không cho credentials (token đi trong header) | Một chỗ duy nhất kiểm soát; service phía sau không trả header CORS | ✅ |
 | D13 | Timeout tới downstream: connect 2s, response 5s; body tối đa 1 MB | Chống treo kết nối và payload quá lớn (DoS) | ✅ |
-| D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | 🟡 |
-| D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | 🟡 |
+| D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | ✅ |
+| D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | ✅ |
 | D16 | K8s local: **k3d** (k3s chạy trong Docker) trên Windows | Nhẹ hơn minikube, có sẵn Traefik ingress như k3s thật | 🟡 |
 | D17 | Postgres/Redis trên K8s: tự viết StatefulSet tối giản trong chart (chỉ cho dev/staging) | Bitnami đã đổi chính sách image (2025); production nên dùng dịch vụ managed | 🟡 |
-| D18 | Supply chain bổ sung: pin GitHub Actions theo SHA, Dependabot, SBOM CycloneDX, ký image bằng cosign (keyless) | Xu hướng SLSA; cosign và SBOM là tuỳ chọn, có thể bỏ nếu muốn gọn | 🟡 |
+| D18 | Supply chain bổ sung: pin GitHub Actions theo SHA, Dependabot, SBOM CycloneDX, ký image bằng cosign (keyless) | Xu hướng SLSA; cosign và SBOM là tuỳ chọn, có thể bỏ nếu muốn gọn | ✅ |
 | D19 | Metrics: `/actuator/prometheus` mở trên **cổng quản trị riêng** (9090 nội bộ), không route qua gateway | Không lộ metrics ra Internet | 🟡 |
 
 ## 5. Yêu cầu chung (áp dụng mọi giai đoạn)
@@ -277,7 +277,14 @@ erDiagram
 
 **Nghiệm thu:** chạy 3 service + compose, rồi chạy `scripts/smoke-test.sh` qua gateway. Script phải xác nhận: đăng ký → đăng nhập → gọi demo user 200, demo admin 403, admin 200 → logout làm token cũ bị 401 → đăng nhập liên tục bị 429 → không có token bị 401 → header giả `X-Forwarded-For` không né được rate limit.
 
-### Giai đoạn 4: Docker + CI/CD DevSecOps 🟡 Chờ duyệt
+### Giai đoạn 4: Docker + CI/CD DevSecOps ✅ Đã code (phần chạy trên `main` chờ lần chạy đầu)
+Plan: `docs/superpowers/plans/2026-11-28-phase4-docker-cicd.md`. Kết quả chính:
+- CI trên nhánh tính năng xanh 8/8 job; image 99–136 MB, uid 10001, 0 CVE HIGH/CRITICAL (Trivy 0.76.2).
+- **Phát hiện khi làm:** quét pom báo 0 CVE nhưng quét image thấy hàng chục (jackson RCE, Tomcat, Netty…) → nâng
+  Boot 3.5.16 và ghim bản vá; nâng Spring Cloud Gateway 4.3.5 làm **mất âm thầm** lớp chống giả IP (test bắt được);
+  Gitleaks trả exit 0 khi quét 0 commit; release Trivy cũ bị gỡ sau sự cố supply-chain 2026 → xác minh lại chuỗi action.
+- Chấp nhận rủi ro có hạn (user duyệt) cho 3 CVE Spring Framework 6.2, hết hạn 2027-02-26, có guard tự động.
+- Hạn chế: ZAP baseline chỉ thấy các response 401 (deny-by-default, chưa có OpenAPI) → đề xuất springdoc + `zap-api-scan`.
 - Dockerfile multi-stage cho từng service: build bằng `maven:3.9-eclipse-temurin-21`, runtime theo D14, `USER 10001`, `HEALTHCHECK`, layered jar, không có source hay Maven trong image.
 - `docker-compose.yml` đầy đủ: thêm 3 service, chỉ gateway publish port, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`.
 - GitHub Actions:

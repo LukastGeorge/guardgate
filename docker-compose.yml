@@ -1,8 +1,11 @@
-# Hạ tầng local cho GuardGate (giai đoạn 1: Postgres + Redis).
-# Các service ứng dụng sẽ được thêm vào ở giai đoạn 4 sau khi có Dockerfile.
+# Toàn bộ GuardGate: Postgres + Redis + auth-service + demo-service + gateway.
+#   docker compose up -d --wait              # chỉ hạ tầng (dev chạy app bằng mvnw)
+#   docker compose up -d --build --wait      # cả hệ thống trong container
 #
 # Mọi secret lấy từ file .env (KHÔNG commit). Cú pháp ${VAR:?msg} làm compose
 # dừng ngay nếu thiếu biến, thay vì âm thầm chạy với mật khẩu rỗng.
+# Chỉ gateway publish cổng ứng dụng ra host; Postgres/Redis publish 127.0.0.1 để dev chạy app ngoài Docker
+# (staging dùng docker-compose.staging.yml để bỏ luôn hai cổng này).
 
 name: guardgate
 
@@ -71,6 +74,98 @@ services:
       - no-new-privileges:true
     networks:
       - backend
+
+  # ---------- Ứng dụng (build từ Dockerfile dùng chung) ----------
+  # Cứng hoá chung: filesystem chỉ đọc (chỉ /tmp ghi được, nằm trên RAM), bỏ mọi Linux capability,
+  # cấm leo quyền, giới hạn RAM. App bị chiếm quyền cũng khó cài mã độc hay leo thang.
+
+  auth-service:
+    build:
+      context: .
+      args: {MODULE: auth-service, PORT: "8081"}
+    image: ${IMAGE_REGISTRY:-guardgate}/guardgate-auth-service:${IMAGE_TAG:-dev}
+    container_name: guardgate-auth-service
+    restart: unless-stopped
+    # Liệt kê TƯỜNG MINH từng biến (không dùng env_file: .env): container chỉ nhận đúng secret nó cần.
+    # auth-service: khoá ký JWT + mật khẩu DB riêng của nó; KHÔNG có mật khẩu superuser Postgres.
+    environment:
+      DB_HOST: postgres
+      POSTGRES_PORT: "5432"      # cổng TRONG mạng Docker (cổng host trong .env có thể khác)
+      AUTH_DB_NAME: ${AUTH_DB_NAME:?AUTH_DB_NAME is required}
+      AUTH_DB_USER: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}
+      JWT_ISSUER: ${JWT_ISSUER:-guardgate-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-guardgate}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
+      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-7d}
+      LOGIN_MAX_FAILED_ATTEMPTS: ${LOGIN_MAX_FAILED_ATTEMPTS:-5}
+      LOGIN_LOCK_DURATION: ${LOGIN_LOCK_DURATION:-15m}
+      BCRYPT_STRENGTH: ${BCRYPT_STRENGTH:-12}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    networks: [backend]
+
+  demo-service:
+    build:
+      context: .
+      args: {MODULE: demo-service, PORT: "8082"}
+    image: ${IMAGE_REGISTRY:-guardgate}/guardgate-demo-service:${IMAGE_TAG:-dev}
+    container_name: guardgate-demo-service
+    restart: unless-stopped
+    environment:
+      JWT_JWK_SET_URI: http://auth-service:8081/.well-known/jwks.json
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    networks: [backend]
+
+  gateway:
+    build:
+      context: .
+      args: {MODULE: gateway, PORT: "8080"}
+    image: ${IMAGE_REGISTRY:-guardgate}/guardgate-gateway:${IMAGE_TAG:-dev}
+    container_name: guardgate-gateway
+    restart: unless-stopped
+    # Gateway hướng Internet: KHÔNG giữ khoá ký JWT hay mật khẩu DB (chỉ cần public key qua JWKS + Redis).
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JWT_ISSUER: ${JWT_ISSUER:-guardgate-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-guardgate}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      GATEWAY_TRUSTED_PROXIES: ${GATEWAY_TRUSTED_PROXIES:-0}
+      GATEWAY_RESPONSE_TIMEOUT: ${GATEWAY_RESPONSE_TIMEOUT:-5s}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      DEMO_SERVICE_URL: http://demo-service:8082
+      JWT_JWK_SET_URI: http://auth-service:8081/.well-known/jwks.json
+    depends_on:
+      redis: {condition: service_healthy}
+      auth-service: {condition: service_healthy}
+      demo-service: {condition: service_healthy}
+    ports:
+      # Điểm vào DUY NHẤT của hệ thống
+      - "127.0.0.1:${GATEWAY_PORT:-8080}:8080"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    networks: [backend]
 
 volumes:
   postgres-data:
