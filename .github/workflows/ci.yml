@@ -18,7 +18,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Không huỷ run trên main: huỷ giữa lúc publish có thể để lại image đã push nhưng chưa ký
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   SEMGREP_IMAGE: semgrep/semgrep:1.140.0@sha256:4372a1de903521f9f10f877b6caf15d150d17e1ca592582682c8d02b77cbd4f6
@@ -116,6 +117,8 @@ jobs:
           trivyignores: .trivyignore.yaml   # chấp nhận rủi ro có hạn, xem file
           format: sarif
           output: trivy-fs.sarif
+          # Không có dòng này, trivy-action BỎ bộ lọc severity khi xuất SARIF → fail cả LOW/MEDIUM
+          limit-severities-for-sarif: true
       - name: Upload SARIF to Security tab
         if: always() && hashFiles('trivy-fs.sarif') != ''
         uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
@@ -146,6 +149,8 @@ jobs:
         run: |
           bash scripts/tests/zap-gate.test.sh
           bash scripts/tests/ci-staging-env.test.sh
+          bash scripts/tests/workflow-policy.test.sh
+          bash scripts/tests/compose-secrets.test.sh
 
   image:
     name: Image ${{ matrix.module }} (build + verify + Trivy)
@@ -230,11 +235,25 @@ jobs:
             MODULE=${{ matrix.module }}
             PORT=${{ matrix.port }}
             REVISION=${{ github.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+          # Chỉ tag SHA ở đây; :latest được gắn SAU khi quét + ký + attest thành công
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
           push: true
           cache-from: type=gha,scope=${{ matrix.module }}
+      # Image vừa push được build LẠI (base image có thể đã đổi so với job `image`) → phải quét chính
+      # digest này trước khi ký. Không quét thì không ký, không gắn latest, staging không deploy được.
+      - name: Trivy gate on the exact pushed digest (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
       - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
       - name: Sign image (keyless, Sigstore)
         run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
@@ -250,6 +269,8 @@ jobs:
           output: sbom-${{ matrix.module }}.cdx.json
       - name: Attest SBOM to the image
         run: cosign attest --yes --type cyclonedx --predicate "sbom-${{ matrix.module }}.cdx.json" "${IMAGE}@${{ steps.build.outputs.digest }}"
+      - name: Tag :latest (only after scan + sign + attest succeeded)
+        run: docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${{ steps.build.outputs.digest }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-${{ matrix.module }}
@@ -292,9 +313,13 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-build --wait --wait-timeout 300
       - name: Postgres/Redis must not be reachable from outside the compose network
         run: |
-          if nc -z -w 2 127.0.0.1 5432 || nc -z -w 2 127.0.0.1 6379; then
-            echo "::error::Postgres or Redis is exposed on the host"; exit 1
-          fi
+          # bash /dev/tcp có sẵn trong bash (không phụ thuộc nc: thiếu nc thì check cũ "pass" mà không kiểm tra gì)
+          for port in 5432 6379; do
+            if timeout 2 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+              echo "::error::port $port is reachable on the host"; exit 1
+            fi
+            echo "port $port: not reachable from the host (OK)"
+          done
       - name: Smoke test through the gateway
         run: bash scripts/smoke-test.sh http://localhost:8080
       - name: OWASP ZAP baseline (passive scan)

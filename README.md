@@ -43,8 +43,11 @@ docker compose down                     # dừng (giữ dữ liệu); thêm -v �
 ```
 
 Mỗi service chạy trong container **non-root** (uid 10001), filesystem **chỉ đọc** (chỉ `/tmp` ghi được, trên RAM),
-bỏ mọi Linux capability, cấm leo quyền và giới hạn RAM. Chỉ gateway publish cổng ra host (`127.0.0.1:8080`);
-auth-service và demo-service chỉ truy cập được trong mạng Docker. Kiểm tra một image:
+bỏ mọi Linux capability, cấm leo quyền và giới hạn RAM. Về **ứng dụng**, chỉ gateway publish cổng ra host
+(`127.0.0.1:8080`); auth-service và demo-service chỉ truy cập được trong mạng Docker. File compose mặc định vẫn
+publish Postgres/Redis trên `127.0.0.1` để dev chạy app bằng Maven; staging (`docker-compose.staging.yml`) bỏ hẳn
+hai cổng này. Mỗi container chỉ nhận đúng biến môi trường nó cần: gateway không giữ khoá ký JWT hay mật khẩu DB
+(kiểm tra bởi `scripts/tests/compose-secrets.test.sh`). Kiểm tra một image:
 `bash scripts/verify-image.sh guardgate/guardgate-gateway:dev`.
 
 ### Chạy từng service bằng Maven (phát triển)
@@ -107,8 +110,8 @@ flowchart LR
 | Test | JUnit, Mockito, Testcontainers | bất kỳ test nào đỏ |
 | SAST | Semgrep (`p/java`, `p/owasp-top-ten`, `p/secrets`) | finding mức ERROR |
 | Secret | Gitleaks (toàn bộ lịch sử git) | có leak, **hoặc** quét 0 commit / git lỗi |
-| Dependency + cấu hình | Trivy fs | HIGH/CRITICAL có bản vá |
-| Image | `verify-image.sh` + Trivy image | chạy root, có secret/source, thiếu healthcheck; CVE HIGH/CRITICAL |
+| Secret + cấu hình | Trivy fs (offline) | HIGH/CRITICAL có bản vá (dependency bắc cầu được kiểm ở bước image) |
+| Image | `verify-image.sh` + Trivy image | chạy root, có secret/source, thiếu healthcheck; CVE HIGH/CRITICAL (quét lại đúng digest được publish, trước khi ký) |
 | Chuỗi cung ứng pipeline | pin-check, actionlint | action không pin theo SHA, workflow lỗi |
 | DAST | OWASP ZAP baseline | alert High, **hoặc** thiếu report |
 
