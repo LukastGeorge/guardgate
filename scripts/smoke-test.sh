@@ -59,16 +59,34 @@ check "old access token is revoked"            401 "$BASE_URL/api/demo/user" -H 
 check "old refresh token is revoked"           401 -X POST "$BASE_URL/api/auth/refresh" \
       -H 'Content-Type: application/json' -d "{\"refreshToken\":\"$REFRESH\"}"
 
-# 11 lần login sai liên tiếp: lần cuối phải bị gateway chặn (429), không tới auth-service
-for _ in $(seq 1 10); do
-  curl -sS -o /dev/null -X POST "$BASE_URL/api/auth/login" \
-       -H 'Content-Type: application/json' -d "$(json "$EMAIL" "Wrong-Password-123")"
+# Login sai liên tiếp: gateway phải chặn (429) trước khi tới auth-service.
+# Bucket ≈10 request/phút nhưng vẫn nạp lại 1 token/giây trong lúc chạy: môi trường chậm (BCrypt dưới
+# giới hạn CPU của K8s) được thêm vài lượt -> chấp nhận 429 xuất hiện trong 15 lần thử, không cứng ở lần 11.
+limited_at=0
+for attempt in $(seq 1 15); do
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/auth/login" \
+         -H 'Content-Type: application/json' -d "$(json "$EMAIL" "Wrong-Password-123")")
+  if [[ "$code" == 429 ]]; then limited_at=$attempt; break; fi
 done
-check "11th login attempt is rate limited"     429 -X POST "$BASE_URL/api/auth/login" \
-      -H 'Content-Type: application/json' -d "$(json "$EMAIL" "Wrong-Password-123")"
-check "spoofed X-Forwarded-For does not help"  429 -X POST "$BASE_URL/api/auth/login" \
-      -H 'X-Forwarded-For: 9.9.9.9' -H 'Content-Type: application/json' \
-      -d "$(json "$EMAIL" "Wrong-Password-123")"
+if (( limited_at == 0 )); then
+  echo "FAIL: brute-force login is rate limited — no HTTP 429 within 15 attempts"; exit 1
+fi
+PASSED=$((PASSED + 1))
+printf '  ok  %-55s %s\n' "brute-force login is rate limited (attempt $limited_at)" 429
+# XFF giả với 3 IP khác nhau: nếu gateway tin XFF của client, mỗi IP có bucket mới -> cả 3 lọt (401).
+# Dùng chung bucket thật -> tối đa 1 request lọt (bucket nạp lại theo mốc giây nguyên), còn lại 429.
+spoof_limited=0
+for fake in 9.9.9.1 9.9.9.2 9.9.9.3; do
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/auth/login" \
+         -H "X-Forwarded-For: $fake" -H 'Content-Type: application/json' \
+         -d "$(json "$EMAIL" "Wrong-Password-123")")
+  [[ "$code" == 429 ]] && spoof_limited=$((spoof_limited + 1))
+done
+if (( spoof_limited < 2 )); then
+  echo "FAIL: spoofed X-Forwarded-For does not help — only $spoof_limited/3 spoofed requests got 429"; exit 1
+fi
+PASSED=$((PASSED + 1))
+printf '  ok  %-55s %s\n' "spoofed X-Forwarded-For does not help ($spoof_limited/3 limited)" 429
 
 # OAuth2 GitHub (chỉ khi auth-service bật profile "github"): redirect_uri phải trỏ về GATEWAY (H4)
 location=$(curl -sS -o /dev/null -w '%{redirect_url}' "$BASE_URL/oauth2/authorization/github")

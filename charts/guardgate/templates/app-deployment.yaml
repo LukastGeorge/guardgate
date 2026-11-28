@@ -28,6 +28,38 @@ spec:
       enableServiceLinks: false
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- with $app.waitFor }}
+      initContainers:
+        # Dùng lại image của app (đã có busybox nc) -> không kéo thêm image bên thứ ba
+        - name: wait-for-deps
+          image: {{ include "guardgate.image" (dict "name" $name "app" $app "root" $) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          command:
+            - sh
+            - -c
+            - |
+              deadline=$(( $(date +%s) + WAIT_TIMEOUT ))
+              for dep in "$@"; do
+                host=${dep%:*}; port=${dep#*:}
+                until nc -z -w 2 "$host" "$port"; do
+                  [ "$(date +%s)" -lt "$deadline" ] || { echo "timed out waiting for $dep"; exit 1; }
+                  echo "waiting for $dep"; sleep 2
+                done
+                echo "$dep is reachable"
+              done
+            - wait-for-deps
+            {{- range . }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: WAIT_TIMEOUT
+              value: {{ $.Values.waitForTimeoutSeconds | quote }}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+      {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ include "guardgate.image" (dict "name" $name "app" $app "root" $) }}

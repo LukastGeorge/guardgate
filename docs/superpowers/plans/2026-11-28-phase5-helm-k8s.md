@@ -86,10 +86,10 @@
 - Create: `scripts/tests/k8s-netpol.test.sh` (chạy pod debug `busybox` trong namespace, kiểm tra: tới `postgres:5432` → chặn; từ pod có nhãn `app=auth-service` giả lập → mở; gateway → auth OK; demo → postgres chặn)
 - Modify: `scripts/smoke-test.sh` (nhận BASE_URL `http://guardgate.localhost:8088`)
 
-- [ ] **Step 1: Cài k3d** (binary chính thức, kiểm tra checksum SHA256 từ release) — cần user đồng ý.
-- [ ] **Step 2: `bash scripts/k8s/up.sh`** → mọi pod `Running`/`Ready`, không có restart; PSA không chặn pod nào (`kubectl get events` không có `violates PodSecurity`).
-- [ ] **Step 3: `bash scripts/smoke-test.sh http://guardgate.localhost:8088`** → `ALL CHECKS PASSED` (gồm bước XFF giả qua ingress — Review Focus #5).
-- [ ] **Step 4: `bash scripts/tests/k8s-netpol.test.sh`** → mọi kết nối bị cấm đều bị chặn, mọi kết nối cần thiết đều thông.
+- [x] **Step 1: Cài k3d** (binary chính thức, kiểm tra checksum SHA256 từ release) — cần user đồng ý.
+- [x] **Step 2: `bash scripts/k8s/up.sh`** → mọi pod `Running`/`Ready`, không có restart; PSA không chặn pod nào (`kubectl get events` không có `violates PodSecurity`).
+- [x] **Step 3: `bash scripts/smoke-test.sh http://guardgate.localhost:8088`** → `ALL CHECKS PASSED` (gồm bước XFF giả qua ingress — Review Focus #5).
+- [x] **Step 4: `bash scripts/tests/k8s-netpol.test.sh`** → mọi kết nối bị cấm đều bị chặn, mọi kết nối cần thiết đều thông.
 - [ ] **Step 5: Commit**: `feat(k8s): local k3d deployment with runtime network policy checks`
 
 ### Task 5: CI — cổng chặn chart + staging trên k3d
