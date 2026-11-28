@@ -32,15 +32,18 @@ run "semgrep (SAST)" docker run --rm -v "$TARGET:/src:ro" "$SEMGREP_IMAGE" \
   semgrep scan --config p/java --config p/owasp-top-ten --config p/secrets \
   --metrics=off --error --severity ERROR --quiet /src
 
-# Secret trong TOÀN BỘ lịch sử git (không chỉ file hiện tại)
-run "gitleaks (secrets in git history)" docker run --rm -v "$TARGET:/repo:ro" "$GITLEAKS_IMAGE" \
-  git /repo --redact --no-banner --exit-code 1
+# Secret trong TOÀN BỘ lịch sử git (không chỉ file hiện tại); wrapper chặn "xanh giả" khi quét 0 commit
+run "gitleaks (secrets in git history)" env GITLEAKS_IMAGE="$GITLEAKS_IMAGE" \
+  bash "$(dirname "$0")/run-gitleaks.sh" "$TARGET"
 
 # Dependency có CVE, secret trong file, cấu hình Dockerfile/compose sai
 run "trivy (dependencies, secrets, misconfig)" docker run --rm -v "$TARGET:/src:ro" \
   -v guardgate-trivy-cache:/root/.cache "$TRIVY_IMAGE" \
   fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-  --skip-files .env --skip-dirs .superpowers --quiet /src
+  --ignorefile /src/.trivyignore.yaml --skip-files .env --skip-dirs .superpowers --quiet /src
+
+# Điều kiện của các CVE đang được chấp nhận rủi ro (.trivyignore.yaml) phải còn đúng
+run "risk acceptance preconditions" bash "$(dirname "$0")/check-risk-acceptance.sh" "${1:-.}"
 
 if [[ $status -eq 0 ]]; then
   echo "SECURITY SCAN PASSED"

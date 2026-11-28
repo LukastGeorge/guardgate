@@ -1,0 +1,180 @@
+# CI/CD DevSecOps của GuardGate.
+#   build + test → SAST (Semgrep) → secrets (Gitleaks) → dependencies (Trivy fs) → image + Trivy image
+#   → [chỉ main] publish GHCR + SBOM + cosign → staging (docker compose) → DAST (OWASP ZAP baseline)
+# Pipeline FAIL khi có lỗ hổng HIGH/CRITICAL. Không bước quét nào được phép "|| true" / continue-on-error.
+#
+# Supply chain của chính pipeline: mọi action pin theo commit SHA (tag có thể bị trỏ lại sang code khác),
+# job pin-check chặn mọi `uses:` không có SHA; quyền GITHUB_TOKEN mặc định chỉ đọc, job nào cần thêm mới xin.
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SEMGREP_IMAGE: semgrep/semgrep:1.140.0
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.28.0
+  TRIVY_VERSION: v0.67.2
+
+jobs:
+  build-test:
+    name: Build + unit/integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # Testcontainers dùng Docker có sẵn trên ubuntu-latest (Postgres + Redis thật)
+      - run: ./mvnw -B -ntp verify
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports
+          path: "**/target/*-reports/"
+          retention-days: 7
+
+  semgrep:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Semgrep (fail on ERROR)
+        run: |
+          docker run --rm -v "$PWD:/src" "$SEMGREP_IMAGE" semgrep scan \
+            --config p/java --config p/owasp-top-ten --config p/secrets \
+            --metrics=off --error --severity ERROR \
+            --sarif --output /src/semgrep.sarif /src
+      - name: Upload SARIF to Security tab
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  gitleaks:
+    name: Secrets in git history (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # quét TOÀN BỘ lịch sử, không chỉ commit cuối
+          persist-credentials: false
+      - name: Gitleaks
+        # Wrapper: khai safe.directory (container root vs repo của user runner) và FAIL nếu git lỗi
+        # hoặc quét 0 commit — Gitleaks tự nó vẫn trả exit 0 trong các trường hợp đó.
+        run: bash scripts/run-gitleaks.sh .
+
+  trivy-fs:
+    name: Dependencies, secrets, misconfig (Trivy fs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trivy fs (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml   # chấp nhận rủi ro có hạn, xem file
+          format: sarif
+          output: trivy-fs.sarif
+      - name: Upload SARIF to Security tab
+        if: always() && hashFiles('trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  pin-check:
+    name: Actions pinned by SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Every `uses:` must reference a 40-char commit SHA
+        run: |
+          unpinned=$(grep -nE '^\s*-?\s*uses:\s*[^./][^@]*@' .github/workflows/*.yml | grep -vE '@[0-9a-f]{40}(\s|$)' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::Unpinned actions found:"; echo "$unpinned"; exit 1
+          fi
+          echo "All actions are pinned by SHA"
+      - name: Risk-accepted CVEs still have valid preconditions
+        run: bash scripts/check-risk-acceptance.sh
+
+  image:
+    name: Image ${{ matrix.module }} (build + verify + Trivy)
+    needs: [build-test, semgrep, gitleaks, trivy-fs, pin-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {module: auth-service, port: "8081"}
+          - {module: gateway, port: "8080"}
+          - {module: demo-service, port: "8082"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          build-args: |
+            MODULE=${{ matrix.module }}
+            PORT=${{ matrix.port }}
+            REVISION=${{ github.sha }}
+          tags: guardgate-${{ matrix.module }}:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.module }}
+      - name: Verify container hardening (non-root, no secrets/sources, healthcheck)
+        run: bash scripts/verify-image.sh guardgate-${{ matrix.module }}:ci
+      - name: Trivy image (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: guardgate-${{ matrix.module }}:ci
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
