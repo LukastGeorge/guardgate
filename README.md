@@ -34,7 +34,20 @@ docker compose up -d --wait                       # Postgres + Redis
 Trên Windows PowerShell dùng `.\mvnw.cmd` và đặt tham số `-D...` trong dấu nháy kép.
 Nếu cổng 5432 đã bị Postgres cài sẵn trên máy chiếm, đặt `POSTGRES_PORT=5433` trong `.env`.
 
-### Chạy cả hệ thống
+### Chạy bằng Docker (cả hệ thống)
+
+```bash
+docker compose up -d --build --wait     # Postgres, Redis, auth-service, demo-service, gateway
+bash scripts/smoke-test.sh              # kiểm tra end-to-end qua http://localhost:8080
+docker compose down                     # dừng (giữ dữ liệu); thêm -v để xoá cả volume
+```
+
+Mỗi service chạy trong container **non-root** (uid 10001), filesystem **chỉ đọc** (chỉ `/tmp` ghi được, trên RAM),
+bỏ mọi Linux capability, cấm leo quyền và giới hạn RAM. Chỉ gateway publish cổng ra host (`127.0.0.1:8080`);
+auth-service và demo-service chỉ truy cập được trong mạng Docker. Kiểm tra một image:
+`bash scripts/verify-image.sh guardgate/guardgate-gateway:dev`.
+
+### Chạy từng service bằng Maven (phát triển)
 
 Mỗi service một terminal; profile `local` đọc `.env` ở thư mục gốc:
 
