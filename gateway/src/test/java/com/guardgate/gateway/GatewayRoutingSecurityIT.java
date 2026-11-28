@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
+import reactor.core.publisher.Flux;
 
 class GatewayRoutingSecurityIT extends AbstractGatewayIT {
 
@@ -184,11 +185,26 @@ class GatewayRoutingSecurityIT extends AbstractGatewayIT {
 
     @Test
     void oversizedBodyReturns413() {
-        client.post().uri("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        assertProblem(client.post().uri("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(new byte[2 * 1024 * 1024])
                 .exchange()
-                .expectStatus().isEqualTo(413);
+                .expectStatus().isEqualTo(413)
+                .expectBody(String.class).returnResult());
         DOWNSTREAM.verify(0, postRequestedFor(urlEqualTo("/api/auth/login")));
+    }
+
+    @Test
+    void oversizedChunkedBodyWithoutContentLengthReturns413() {
+        // Review finding #3: không có Content-Length (Transfer-Encoding: chunked) vẫn phải bị giới hạn 1 MB
+        DOWNSTREAM.stubFor(post("/api/auth/register").willReturn(okJson("{}")));
+        Flux<byte[]> twoMegabytes = Flux.range(0, 32).map(i -> new byte[64 * 1024]);
+
+        assertProblem(client.post().uri("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                .body(twoMegabytes, byte[].class)
+                .exchange()
+                .expectStatus().isEqualTo(413)
+                .expectBody(String.class).returnResult());
+        DOWNSTREAM.verify(0, postRequestedFor(urlEqualTo("/api/auth/register")));
     }
 
     // ---------- Request id, CORS, header ----------

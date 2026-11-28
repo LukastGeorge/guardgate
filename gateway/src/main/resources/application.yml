@@ -30,9 +30,7 @@ spring:
           default-filters:
             # Downstream cũng gửi header bảo mật => chỉ giữ một bản
             - DedupeResponseHeader=Access-Control-Allow-Origin X-Content-Type-Options X-Frame-Options Cache-Control Content-Security-Policy Referrer-Policy, RETAIN_FIRST
-            - name: RequestSize
-              args:
-                maxSize: 1MB
+            # Giới hạn body: RequestBodySizeLimitFilter (RequestSize có sẵn bỏ sót body chunked)
           routes:
             - id: auth-service
               uri: ${AUTH_SERVICE_URL:http://localhost:8081}
@@ -48,6 +46,7 @@ guardgate:
   gateway:
     # Số proxy tin cậy đứng trước gateway (D9): 0 khi chạy local, 1 khi sau ingress trên K8s
     trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:0}
+    max-request-body-size: 1MB   # D13, áp cả cho body chunked
     # Token bucket (D8): replenish-rate token/giây, burst-capacity token tối đa, requested-tokens/request
     rate-limits:
       auth-ip:          # login/register/refresh theo IP: ≈10 request/phút

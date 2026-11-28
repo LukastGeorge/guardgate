@@ -1,6 +1,8 @@
 package com.guardgate.gateway;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
@@ -12,12 +14,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.guardgate.gateway.support.GatewayTestInfra;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.http.HttpHeaders;
@@ -41,6 +45,8 @@ class RateLimitIT {
     private ReactiveStringRedisTemplate redis;
     @Autowired
     private MeterRegistry meterRegistry;
+    @LocalServerPort
+    private int port;
 
     @DynamicPropertySource
     static void rateLimits(DynamicPropertyRegistry registry) {
@@ -102,6 +108,23 @@ class RateLimitIT {
         }
         assertThat(statusesA).containsExactly(200, 200, 429);
         assertThat(getDemoUser(userB)).isEqualTo(200);
+        // Review finding #1: request bị 429 KHÔNG được tới service phía sau
+        GatewayTestInfra.DOWNSTREAM.verify(2, getRequestedFor(urlEqualTo("/api/demo/user"))
+                .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer " + userA)));
+    }
+
+    @Test
+    void percentEncodedLoginPathIsStillRateLimited() {
+        // Review finding #2: "%6C" = "l". Security và route giải mã path, nên rate limiter cũng phải giải mã
+        GatewayTestInfra.DOWNSTREAM.stubFor(post(urlMatching("/api/auth/.*")).willReturn(unauthorized()));
+        URI encodedLogin = URI.create("http://localhost:" + port + "/api/auth/%6Cogin");
+
+        List<Integer> statuses = new ArrayList<>();
+        for (int i = 0; i < 11; i++) {
+            statuses.add(client.post().uri(encodedLogin).contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(LOGIN_BODY).exchange().returnResult(String.class).getStatus().value());
+        }
+        assertThat(statuses.getLast()).isEqualTo(429);
     }
 
     @Test
