@@ -9,7 +9,65 @@ server:
 spring:
   application:
     name: gateway
-  # Routes, JWT filter và rate limiter (Redis) sẽ được cấu hình ở giai đoạn 3.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Tắt bộ lọc Forwarded/X-Forwarded có sẵn: ForwardedHeadersFilter tự đặt giá trị an toàn
+          x-forwarded:
+            enabled: false
+          forwarded:
+            enabled: false
+          httpclient:
+            connect-timeout: 2000            # ms (D13)
+            response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:5s}
+          default-filters:
+            # Downstream cũng gửi header bảo mật => chỉ giữ một bản
+            - DedupeResponseHeader=Access-Control-Allow-Origin X-Content-Type-Options X-Frame-Options Cache-Control Content-Security-Policy Referrer-Policy, RETAIN_FIRST
+            # Giới hạn body: RequestBodySizeLimitFilter (RequestSize có sẵn bỏ sót body chunked)
+          routes:
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**,/api/users/**,/api/admin/**,/oauth2/**,/login/oauth2/**
+            - id: demo-service
+              uri: ${DEMO_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/demo/**
+            # Không có route cho /.well-known/** hay /actuator/** của downstream => 404 từ bên ngoài
+
+guardgate:
+  gateway:
+    # Số proxy tin cậy đứng trước gateway (D9): 0 khi chạy local, 1 khi sau ingress trên K8s
+    trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:0}
+    max-request-body-size: 1MB   # D13, áp cả cho body chunked
+    # Token bucket (D8): replenish-rate token/giây, burst-capacity token tối đa, requested-tokens/request
+    rate-limits:
+      auth-ip:          # login/register/refresh theo IP: ≈10 request/phút
+        replenish-rate: 1
+        burst-capacity: 60
+        requested-tokens: 6
+      ip:               # mọi request theo IP
+        replenish-rate: 20
+        burst-capacity: 40
+        requested-tokens: 1
+      user:             # request đã xác thực theo user (sub)
+        replenish-rate: 10
+        burst-capacity: 20
+        requested-tokens: 1
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+    jwt:
+      # Public key của auth-service; trong K8s là http://auth-service:8081/.well-known/jwks.json
+      jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+      issuer: ${JWT_ISSUER:guardgate-auth}
+      audience: ${JWT_AUDIENCE:guardgate}
 
 management:
   endpoints:

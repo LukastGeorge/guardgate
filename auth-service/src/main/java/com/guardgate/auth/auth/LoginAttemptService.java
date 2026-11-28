@@ -3,6 +3,7 @@ package com.guardgate.auth.auth;
 import com.guardgate.auth.config.AuthSecurityProperties;
 import com.guardgate.auth.user.UserRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,9 +29,12 @@ public class LoginAttemptService {
     /** @return true nếu lần sai này khiến tài khoản bị khoá */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean recordFailure(UUID userId) {
-        users.incrementFailedAttempts(userId);
+        Instant now = clock.instant();
+        if (users.incrementFailedAttempts(userId, now) == 0) {
+            return false; // đã bị khoá bởi một request song song: không đếm, không khoá lại
+        }
         return users.lockIfThresholdReached(userId, properties.maxFailedAttempts(),
-                clock.instant().plus(properties.lockDuration())) == 1;
+                now.plus(properties.lockDuration()), now) == 1;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

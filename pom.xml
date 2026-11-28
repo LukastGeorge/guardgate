@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.7</version>
+        <version>3.5.12</version>
         <relativePath/>
     </parent>
 
@@ -31,6 +31,8 @@
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <!-- Ghi đè version do Boot quản lý: 1.21.4 hỗ trợ Docker Engine 29 (API >= 1.44) -->
         <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- Vá CVE-2026-42198 (DoS) và CVE-2026-54291 (SCRAM downgrade) của pgjdbc -->
+        <postgresql.version>42.7.12</postgresql.version>
     </properties>
 
     <dependencyManagement>

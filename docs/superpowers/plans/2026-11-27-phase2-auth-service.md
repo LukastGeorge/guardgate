@@ -167,7 +167,7 @@
 
 - [x] **Step 1: Viết IT** `oauth2EndpointsAreDisabledWithoutGithubProfile` (401).
 - [x] **Step 2: Cài đặt** → PASS.
-- [ ] **Step 3 (còn nợ → H6):** unit test cho `OAuth2AccountService` (tìm theo githubId; tạo mới; email trùng → `account_exists`) và `GitHubOAuth2UserService.fetchVerifiedPrimaryEmail` (mock server: chỉ có email chưa xác minh → `verified_email_required`; API 500 → `github_api_error`).
+- [x] **Step 3 (làm bù ở GĐ3 Task 1, H6):** unit test cho `OAuth2AccountService` (tìm theo githubId; tạo mới; email trùng → `account_exists`) và `GitHubOAuth2UserService.fetchVerifiedPrimaryEmail` (mock server: chỉ có email chưa xác minh → `verified_email_required`; API 500 → `github_api_error`).
 
 ### Task 9: Chạy local và kiểm chứng end-to-end
 
@@ -190,3 +190,5 @@
 | L2.3 | Testcontainers có thể không chạy với Docker 29 | Docker 29 nâng API tối thiểu lên 1.44 | Ghim Testcontainers 1.21.4 |
 | L2.4 | Kế hoạch ban đầu dùng `AuthServiceApplicationTests.contextLoads` | Context cần DB + key | Xoá file đó, thay bằng `AuthFlowIT` (Testcontainers) |
 | L2.5 | Rà soát sau khi xong phát hiện H1–H6 | Chưa chạy Trivy và chưa rà soát thủ công trước khi commit | Từ giai đoạn 3: chạy Trivy/Semgrep **trong** quy trình của mỗi task, không đợi tới cuối; giai đoạn 4 tự động hoá việc này trong CI |
+| L2.6 | (Phát hiện ở GĐ3) 20 lần login sai song song khoá tài khoản **3 lần** (đáng lẽ 1) | Các request đã đọc user khi chưa bị khoá vẫn tiếp tục đếm sau khi request khác đã khoá và reset bộ đếm | Thêm điều kiện "chưa bị khoá tại `now`" vào cả 2 câu UPDATE (`incrementFailedAttempts`, `lockIfThresholdReached`). **Bài học:** code "nguyên tử" từng câu chưa chắc đúng khi ghép nhiều câu; phải có test đồng thời thật |
+| L2.7 | (Phát hiện ở GĐ3) Thêm class IT thứ hai thì lỗi 500 sau 30 giây | `@Container static` trong lớp cha: JUnit tạo lại container cho từng class, còn Spring dùng lại context cũ trỏ tới cổng đã tắt | Dùng singleton container (static block). Lỗi bị che vì trước đó chỉ có 1 class IT |

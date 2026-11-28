@@ -134,7 +134,7 @@ sequenceDiagram
 
 ## 4. Quyết định thiết kế
 
-Trạng thái: ✅ đã chốt · 🟡 **đề xuất, cần bàn**.
+Trạng thái: ✅ đã chốt (D5–D13 được duyệt 2026-11-27) · 🟡 **đề xuất, cần bàn**.
 
 | # | Quyết định | Lý do / Đánh đổi | |
 |---|---|---|---|
@@ -142,15 +142,15 @@ Trạng thái: ✅ đã chốt · 🟡 **đề xuất, cần bàn**.
 | D2 | Refresh rotation + thu hồi cả family khi phát hiện reuse | Phát hiện token bị đánh cắp (theo OAuth 2.0 Security BCP) | ✅ |
 | D3 | Logout ghi `jti` vào Redis với TTL bằng thời gian sống còn lại của token | Thu hồi JWT stateless; key tự hết hạn | ✅ |
 | D4 | Khoá 15 phút sau 5 lần sai; cùng một thông báo lỗi cho mọi trường hợp | Chống brute-force + chống dò tìm tài khoản | ✅ |
-| D5 | Dùng Spring Cloud Gateway **WebFlux** (không dùng bản MVC) | Có sẵn RedisRateLimiter reactive; non-blocking hợp cho edge | 🟡 |
-| D6 | Gateway kiểm tra denylist: **fail-closed** (Redis lỗi → 401) | Token đã logout không được lọt qua; đánh đổi: Redis chết thì mọi request cần auth đều lỗi | 🟡 |
-| D7 | Rate limit: **fail-open** (Redis lỗi → cho qua, có log + metric) | Ưu tiên tính sẵn sàng; lockout ở auth-service (Postgres) vẫn chặn brute-force | 🟡 |
-| D8 | Rate limit 3 tầng (token bucket): **auth-ip** 10 req/phút/IP cho login/register/refresh; **ip** burst 40, nạp 20/s cho mọi request; **user** burst 20, nạp 10/s theo `sub` | Login cần chặt nhất; theo user để chống một tài khoản bị lạm dụng từ nhiều IP | 🟡 |
-| D9 | IP client: mặc định dùng remote address; chỉ tin `X-Forwarded-For` khi đặt `GATEWAY_TRUSTED_PROXIES=n` (số hop) | Chống giả mạo XFF để né rate limit; trên K8s đặt 1 (ingress) | 🟡 |
-| D10 | Downstream xác thực lại JWT (chữ ký, iss, aud), **không** kiểm tra denylist | Defense in depth mà không thêm phụ thuộc Redis vào mọi service; denylist chỉ ở edge và auth-service | 🟡 |
-| D11 | Không tạo module dùng chung (`common`); chấp nhận trùng lặp nhỏ (ProblemDetail writer, role converter) | Gateway là reactive còn service khác là servlet, API khác nhau; YAGNI | 🟡 |
-| D12 | CORS chỉ cấu hình ở gateway, allow-list từ `CORS_ALLOWED_ORIGINS`, không cho credentials (token đi trong header) | Một chỗ duy nhất kiểm soát; service phía sau không trả header CORS | 🟡 |
-| D13 | Timeout tới downstream: connect 2s, response 5s; body tối đa 1 MB | Chống treo kết nối và payload quá lớn (DoS) | 🟡 |
+| D5 | Dùng Spring Cloud Gateway **WebFlux** (không dùng bản MVC) | Có sẵn RedisRateLimiter reactive; non-blocking hợp cho edge | ✅ |
+| D6 | Gateway kiểm tra denylist: **fail-closed** (Redis lỗi → 401) | Token đã logout không được lọt qua; đánh đổi: Redis chết thì mọi request cần auth đều lỗi | ✅ |
+| D7 | Rate limit: **fail-open** (Redis lỗi → cho qua, có log + metric) | Ưu tiên tính sẵn sàng; lockout ở auth-service (Postgres) vẫn chặn brute-force | ✅ |
+| D8 | Rate limit 3 tầng (token bucket): **auth-ip** 10 req/phút/IP cho login/register/refresh; **ip** burst 40, nạp 20/s cho mọi request; **user** burst 20, nạp 10/s theo `sub` | Login cần chặt nhất; theo user để chống một tài khoản bị lạm dụng từ nhiều IP | ✅ |
+| D9 | IP client: mặc định dùng remote address; chỉ tin `X-Forwarded-For` khi đặt `GATEWAY_TRUSTED_PROXIES=n` (số hop) | Chống giả mạo XFF để né rate limit; trên K8s đặt 1 (ingress) | ✅ |
+| D10 | Downstream xác thực lại JWT (chữ ký, iss, aud), **không** kiểm tra denylist | Defense in depth mà không thêm phụ thuộc Redis vào mọi service; denylist chỉ ở edge và auth-service | ✅ |
+| D11 | Không tạo module dùng chung (`common`); chấp nhận trùng lặp nhỏ (ProblemDetail writer, role converter) | Gateway là reactive còn service khác là servlet, API khác nhau; YAGNI | ✅ |
+| D12 | CORS chỉ cấu hình ở gateway, allow-list từ `CORS_ALLOWED_ORIGINS`, không cho credentials (token đi trong header) | Một chỗ duy nhất kiểm soát; service phía sau không trả header CORS | ✅ |
+| D13 | Timeout tới downstream: connect 2s, response 5s; body tối đa 1 MB | Chống treo kết nối và payload quá lớn (DoS) | ✅ |
 | D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | 🟡 |
 | D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | 🟡 |
 | D16 | K8s local: **k3d** (k3s chạy trong Docker) trên Windows | Nhẹ hơn minikube, có sẵn Traefik ingress như k3s thật | 🟡 |
@@ -255,14 +255,14 @@ erDiagram
 
 **Hardening (đưa vào Task 1 của plan giai đoạn 3)**, phát hiện khi rà soát bằng skill security-reviewer:
 
-| ID | Mức | Vấn đề | Xử lý |
-|---|---|---|---|
-| H1 | HIGH | Spring Boot 3.5.7: CVE-2026-22731, CVE-2026-22733 (Actuator auth bypass) | Nâng lên 3.5.12 |
-| H2 | HIGH | pgjdbc 42.7.8: CVE-2026-42198 (DoS), CVE-2026-54291 (SCRAM downgrade) | Ghim 42.7.12 |
-| H3 | MEDIUM | Mật khẩu ≤ 64 **ký tự** nhưng có thể > 72 **byte** UTF-8 (BCrypt giới hạn 72 byte); emoji/tiếng Việt có dấu có thể gây lỗi 500 | Validate độ dài theo byte UTF-8 ≤ 72 |
-| H4 | LOW | Chưa rà soát thủ công đầy đủ phần OAuth2 khi đứng sau gateway (redirect-uri) | Kiểm tra trong smoke test giai đoạn 3 |
-| H5 | MEDIUM | Chưa có test **đồng thời** cho lockout (20 request sai song song phải khoá đúng 1 lần) và cho rotation (2 request refresh song song cùng một token thì đúng 1 cái thành công) | Thêm IT chạy song song |
-| H6 | LOW | Luồng GitHub OAuth2 chưa có test tự động (chỉ test khi profile tắt) | Unit test `OAuth2AccountService` + `GitHubOAuth2UserService` (mock `RestClient`) |
+| ID | Mức | Vấn đề | Xử lý | Trạng thái |
+|---|---|---|---|---|
+| H1 | HIGH | Spring Boot 3.5.7: CVE-2026-22731, CVE-2026-22733 (Actuator auth bypass) | Nâng lên 3.5.12 | ✅ GĐ3 Task 1 |
+| H2 | HIGH | pgjdbc 42.7.8: CVE-2026-42198 (DoS), CVE-2026-54291 (SCRAM downgrade) | Ghim 42.7.12 | ✅ GĐ3 Task 1 |
+| H3 | MEDIUM | Mật khẩu ≤ 64 **ký tự** nhưng có thể > 72 **byte** UTF-8 (BCrypt giới hạn 72 byte); emoji/tiếng Việt có dấu có thể gây lỗi 500 | Validate độ dài theo byte UTF-8 ≤ 72 | ✅ GĐ3 Task 1 |
+| H4 | LOW | Chưa rà soát thủ công đầy đủ phần OAuth2 khi đứng sau gateway (redirect-uri) | Kiểm tra trong smoke test giai đoạn 3 | ✅ GĐ3 Task 6: phát hiện **bug thật**: redirect_uri mất cổng (thiếu X-Forwarded-Port) → đã sửa, smoke test kiểm tra |
+| H5 | MEDIUM | Chưa có test **đồng thời** cho lockout (20 request sai song song phải khoá đúng 1 lần) và cho rotation (2 request refresh song song cùng một token thì đúng 1 cái thành công) | Thêm IT chạy song song | ✅ GĐ3 Task 1: test đồng thời phát hiện **bug thật**: lockout bị kích hoạt nhiều lần → đã sửa |
+| H6 | LOW | Luồng GitHub OAuth2 chưa có test tự động (chỉ test khi profile tắt) | Unit test `OAuth2AccountService` + `GitHubOAuth2UserService` (mock `RestClient`) | ✅ GĐ3 Task 1 |
 
 ### Giai đoạn 3: Gateway + rate limiting + demo-service 🟡 Chờ duyệt
 **Gateway (:8080)**
