@@ -11,7 +11,7 @@ name: guardgate
 
 services:
   postgres:
-    image: postgres:17.6-alpine
+    image: postgres:19.0-alpine
     container_name: guardgate-postgres
     restart: unless-stopped
     environment:
