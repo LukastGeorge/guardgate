@@ -29,3 +29,6 @@ Thumbs.db
 zap-report.*
 trivy-report.*
 semgrep-report.*
+
+# Công cụ dev tải về cục bộ (k3d...), không commit binary
+.tools/

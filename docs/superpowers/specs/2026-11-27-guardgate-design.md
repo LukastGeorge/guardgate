@@ -134,7 +134,7 @@ sequenceDiagram
 
 ## 4. Quyết định thiết kế
 
-Trạng thái: ✅ đã chốt (D5–D13 duyệt 2026-11-27; D14, D15, D18 duyệt 2026-11-28) · 🟡 **đề xuất, cần bàn**.
+Trạng thái: ✅ đã chốt (D5–D13 duyệt 2026-11-27; D14, D15, D18, D16, D17, D20, D21 duyệt 2026-11-28) · 🟡 **đề xuất, cần bàn**.
 
 | # | Quyết định | Lý do / Đánh đổi | |
 |---|---|---|---|
@@ -153,8 +153,10 @@ Trạng thái: ✅ đã chốt (D5–D13 duyệt 2026-11-27; D14, D15, D18 duy�
 | D13 | Timeout tới downstream: connect 2s, response 5s; body tối đa 1 MB | Chống treo kết nối và payload quá lớn (DoS) | ✅ |
 | D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | ✅ |
 | D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | ✅ |
-| D16 | K8s local: **k3d** (k3s chạy trong Docker) trên Windows | Nhẹ hơn minikube, có sẵn Traefik ingress như k3s thật | 🟡 |
-| D17 | Postgres/Redis trên K8s: tự viết StatefulSet tối giản trong chart (chỉ cho dev/staging) | Bitnami đã đổi chính sách image (2025); production nên dùng dịch vụ managed | 🟡 |
+| D16 | K8s: **k3d** (k3s chạy trong Docker) cho **cả local lẫn CI** (thay kind ở D15 cho phần staging GĐ5) | Đúng "k3s" trong yêu cầu; có sẵn Traefik ingress và NetworkPolicy controller (kube-router) như k3s thật; một công cụ cho cả hai nơi | ✅ |
+| D17 | Postgres/Redis trên K8s: tự viết StatefulSet tối giản trong chart (chỉ cho dev/staging) | Bitnami đã đổi chính sách image (2025); production nên dùng dịch vụ managed | ✅ |
+| D20 | Ingress: **Traefik** có sẵn của k3s; Ingress chỉ trỏ tới gateway | ingress-nginx đã bị retire (2026) nên không chọn; Traefik đi kèm k3s, không phải cài thêm | ✅ |
+| D21 | Secret K8s: **mỗi component một Secret** (auth, gateway, postgres-admin, redis), sinh từ `.env` bằng script, chart chỉ tham chiếu `existingSecret` | Bài học GĐ4 (env_file): gateway không được mount khoá ký JWT; secret không bao giờ nằm trong values.yaml hay git | ✅ |
 | D18 | Supply chain bổ sung: pin GitHub Actions theo SHA, Dependabot, SBOM CycloneDX, ký image bằng cosign (keyless) | Xu hướng SLSA; cosign và SBOM là tuỳ chọn, có thể bỏ nếu muốn gọn | ✅ |
 | D19 | Metrics: `/actuator/prometheus` mở trên **cổng quản trị riêng** (9090 nội bộ), không route qua gateway | Không lộ metrics ra Internet | 🟡 |
 
