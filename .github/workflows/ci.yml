@@ -138,8 +138,14 @@ jobs:
             echo "::error::Unpinned actions found:"; echo "$unpinned"; exit 1
           fi
           echo "All actions are pinned by SHA"
+      - name: Lint workflows (actionlint + shellcheck)
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
       - name: Risk-accepted CVEs still have valid preconditions
         run: bash scripts/check-risk-acceptance.sh
+      - name: Tests of the gate scripts themselves
+        run: |
+          bash scripts/tests/zap-gate.test.sh
+          bash scripts/tests/ci-staging-env.test.sh
 
   image:
     name: Image ${{ matrix.module }} (build + verify + Trivy)
@@ -183,3 +189,134 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           trivyignores: .trivyignore.yaml
+
+  # ---------------- Chỉ chạy trên main: publish → staging → DAST ----------------
+
+  publish:
+    name: Publish ${{ matrix.module }} (GHCR + SBOM + cosign)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write     # cosign keyless: danh tính ký là OIDC token của chính workflow này
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {module: auth-service, port: "8081"}
+          - {module: gateway, port: "8080"}
+          - {module: demo-service, port: "8082"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name (GHCR yêu cầu chữ thường)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/guardgate-${{ matrix.module }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          build-args: |
+            MODULE=${{ matrix.module }}
+            PORT=${{ matrix.port }}
+            REVISION=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          push: true
+          cache-from: type=gha,scope=${{ matrix.module }}
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: Sign image (keyless, Sigstore)
+        run: cosign sign --yes "${IMAGE}@${{ steps.build.outputs.digest }}"
+      - name: SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx
+          output: sbom-${{ matrix.module }}.cdx.json
+      - name: Attest SBOM to the image
+        run: cosign attest --yes --type cyclonedx --predicate "sbom-${{ matrix.module }}.cdx.json" "${IMAGE}@${{ steps.build.outputs.digest }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-${{ matrix.module }}
+          path: sbom-${{ matrix.module }}.cdx.json
+
+  staging-dast:
+    name: Staging (compose) + smoke + OWASP ZAP baseline
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:stable@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: Verify image signatures before deploying
+        run: |
+          for m in auth-service gateway demo-service; do
+            cosign verify "$IMAGE_REGISTRY/guardgate-$m:$IMAGE_TAG" \
+              --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+            echo "signature OK: guardgate-$m"
+          done
+      - name: Ephemeral secrets for this run only
+        run: bash scripts/ci-staging-env.sh > .env
+      - name: Deploy staging
+        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --no-build --wait --wait-timeout 300
+      - name: Postgres/Redis must not be reachable from outside the compose network
+        run: |
+          if nc -z -w 2 127.0.0.1 5432 || nc -z -w 2 127.0.0.1 6379; then
+            echo "::error::Postgres or Redis is exposed on the host"; exit 1
+          fi
+      - name: Smoke test through the gateway
+        run: bash scripts/smoke-test.sh http://localhost:8080
+      - name: OWASP ZAP baseline (passive scan)
+        run: |
+          mkdir -p zap && cp .zap/rules.tsv zap/ && chmod 777 zap
+          rc=0
+          docker run --rm --network host -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t http://localhost:8080 -c rules.tsv -J zap-report.json -r zap-report.html -I || rc=$?
+          echo "zap-baseline exit code: $rc"
+          # -I: không fail vì WARN; exit 3 = ZAP tự lỗi → FAIL. Quyết định cuối do zap-gate.sh (đọc report).
+          if [ "$rc" -eq 3 ]; then echo "::error::ZAP failed to run"; exit 1; fi
+      - name: DAST gate (fail on High)
+        run: bash scripts/zap-gate.sh zap/zap-report.json
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zap-report
+          path: zap/
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml logs --no-color --tail 200
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.staging.yml down -v

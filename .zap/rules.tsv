@@ -1,0 +1,4 @@
+# OWASP ZAP baseline rule overrides (zap-baseline.py -c rules.tsv).
+# Format: <pluginId><TAB><IGNORE|INFO|WARN|FAIL><TAB><tên rule>.
+# Chỉ thêm dòng IGNORE sau khi đã phân tích alert, kèm lý do ở comment phía trên dòng đó.
+# Cổng chặn thật là scripts/zap-gate.sh: FAIL khi có alert riskcode 3 (High), không phụ thuộc file này.
