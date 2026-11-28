@@ -1,0 +1,18 @@
+# Chỉ gửi vào build context những gì Dockerfile cần. Đặc biệt KHÔNG BAO GIỜ gửi secret.
+.git
+.github
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+**/target
+.superpowers
+.idea
+.vscode
+docs
+infra
+scripts
+README.md
+docker-compose*.yml

@@ -1,26 +1,26 @@
 package com.guardgate.gateway.web;
 
 import java.net.URI;
-import java.util.List;
 import java.util.Locale;
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.cloud.gateway.filter.headers.HttpHeadersFilter;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Mono;
 
 /**
- * Thay toàn bộ header Forwarded / X-Forwarded-* của client bằng giá trị gateway tự xác định.
+ * Thay toàn bộ header Forwarded / X-Forwarded-* của client bằng giá trị gateway tự xác định, NGAY TRƯỚC
+ * khi gửi request xuống service.
  *
  * <p>auth-service tin X-Forwarded-For từ proxy nội bộ (gateway) để ghi IP vào audit log. Nếu gateway
  * chuyển nguyên header của client xuống, kẻ tấn công chỉ cần gửi "X-Forwarded-For: 6.6.6.6" là giả được IP.
- * Bộ lọc có sẵn của Spring Cloud Gateway được tắt (application.yml) để chỉ còn một nguồn sự thật.
+ *
+ * <p>Là {@link HttpHeadersFilter} (không phải GlobalFilter) với order thấp nhất: Spring Cloud Gateway 4.3.5+
+ * có RemoveXForwardedHeadersFilter (order 0) xoá MỌI X-Forwarded-* khi chưa cấu hình trusted-proxies, kể cả
+ * header ta đặt ở GlobalFilter. Chạy sau cùng trong chuỗi HttpHeadersFilter nên giá trị của ta là giá trị cuối.
  */
 @Component
-public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
+public class ForwardedHeadersFilter implements HttpHeadersFilter, Ordered {
 
     private final ClientIpResolver clientIpResolver;
 
@@ -29,10 +29,10 @@ public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
     }
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        ServerHttpRequest original = exchange.getRequest();
-        HttpHeaders incoming = original.getHeaders();
-        URI uri = original.getURI();
+    public HttpHeaders filter(HttpHeaders input, ServerWebExchange exchange) {
+        // Header GỐC của client (input có thể đã bị filter khác chỉnh sửa)
+        HttpHeaders incoming = exchange.getRequest().getHeaders();
+        URI uri = exchange.getRequest().getURI();
         boolean trustIncoming = clientIpResolver.behindTrustedProxy();
 
         String clientIp = clientIpResolver.resolve(exchange);
@@ -45,25 +45,27 @@ public class ForwardedHeadersFilter implements GlobalFilter, Ordered {
         String port = firstOr(trustIncoming ? incoming.getFirst("X-Forwarded-Port") : null,
                 portOf(hostAndPort, proto));
 
-        ServerHttpRequest sanitized = original.mutate().headers(headers -> {
-            List<String> toRemove = headers.keySet().stream()
-                    .filter(name -> {
-                        String lower = name.toLowerCase(Locale.ROOT);
-                        return lower.equals("forwarded") || lower.startsWith("x-forwarded-") || lower.equals("x-real-ip");
-                    })
-                    .toList();
-            toRemove.forEach(headers::remove);
-            headers.set("X-Forwarded-For", clientIp);
-            headers.set("X-Forwarded-Proto", proto);
-            headers.set("X-Forwarded-Host", host);
-            headers.set("X-Forwarded-Port", port);
-        }).build();
-        return chain.filter(exchange.mutate().request(sanitized).build());
+        HttpHeaders sanitized = new HttpHeaders();
+        input.forEach((name, values) -> {
+            if (!isForwardingHeader(name)) {
+                sanitized.addAll(name, values);
+            }
+        });
+        sanitized.set("X-Forwarded-For", clientIp);
+        sanitized.set("X-Forwarded-Proto", proto);
+        sanitized.set("X-Forwarded-Host", host);
+        sanitized.set("X-Forwarded-Port", port);
+        return sanitized;
     }
 
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE;
+        return Ordered.LOWEST_PRECEDENCE;
+    }
+
+    private static boolean isForwardingHeader(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.equals("forwarded") || lower.startsWith("x-forwarded-") || lower.equals("x-real-ip");
     }
 
     /** "localhost:8080" → "localhost"; "[::1]:8080" → "[::1]"; "example.com" → "example.com". */

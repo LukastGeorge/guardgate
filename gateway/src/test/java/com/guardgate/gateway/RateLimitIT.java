@@ -31,7 +31,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * Giá trị rate limit THẬT cho auth-ip và ip (spec D8); user được hạ xuống 1/2/1 để test nhanh.
+ * Giá trị rate limit THẬT cho auth-ip và ip (spec D8); user = 1/2/2 (mỗi request tốn CẢ bucket): RedisRateLimiter tính thời gian theo GIÂY nguyên, nên vượt một mốc giây là được +1 token; với 1/2/1 test bị flaky khi chạy chậm hơn 1 giây.
  * Mọi request từ cùng 127.0.0.1 với trusted-proxies=0 → chung một bucket IP; mỗi test xoá bucket trước.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -53,7 +53,7 @@ class RateLimitIT {
         GatewayTestInfra.register(registry, GatewayTestInfra.downstreamUrl());
         GatewayTestInfra.registerRateLimit(registry, "auth-ip", 1, 60, 6);
         GatewayTestInfra.registerRateLimit(registry, "ip", 20, 40, 1);
-        GatewayTestInfra.registerRateLimit(registry, "user", 1, 2, 1);
+        GatewayTestInfra.registerRateLimit(registry, "user", 1, 2, 2);
         registry.add("GATEWAY_TRUSTED_PROXIES", () -> 0);
     }
 
@@ -103,13 +103,13 @@ class RateLimitIT {
         String userB = GatewayTestInfra.JWT.token("user-b", List.of("USER"));
 
         List<Integer> statusesA = new ArrayList<>();
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             statusesA.add(getDemoUser(userA));
         }
-        assertThat(statusesA).containsExactly(200, 200, 429);
+        assertThat(statusesA).containsExactly(200, 429);
         assertThat(getDemoUser(userB)).isEqualTo(200);
         // Review finding #1: request bị 429 KHÔNG được tới service phía sau
-        GatewayTestInfra.DOWNSTREAM.verify(2, getRequestedFor(urlEqualTo("/api/demo/user"))
+        GatewayTestInfra.DOWNSTREAM.verify(1, getRequestedFor(urlEqualTo("/api/demo/user"))
                 .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer " + userA)));
     }
 

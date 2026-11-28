@@ -1,0 +1,37 @@
+# CHẤP NHẬN RỦI RO CÓ THỜI HẠN (risk acceptance) — được user duyệt ngày 2026-11-28.
+#
+# Spring Framework 6.2.x (Spring Boot 3.5) không còn bản vá OSS cho các CVE dưới đây; bản vá chỉ có ở
+# Spring Framework 7.0.9 (Spring Boot 4). Dự án giữ Spring Boot 3 theo yêu cầu ban đầu.
+#
+# Điều kiện để chấp nhận (được KIỂM TRA TỰ ĐỘNG bởi scripts/check-risk-acceptance.sh trong CI):
+#   GuardGate không dùng XsltView, Server-Sent Events hay WebFlux functional endpoints (RouterFunction).
+# Nếu điều kiện bị vi phạm → CI fail. Khi `expired_at` qua đi → Trivy báo lại CVE → CI fail cho tới khi
+# nâng lên Spring Boot 4 hoặc đánh giá lại.
+#
+# Mỗi mục: CVE, package, lý do không khai thác được, ngày hết hạn. Không thêm mục mới nếu chưa phân tích.
+
+vulnerabilities:
+  - id: CVE-2026-47884
+    purls:
+      - pkg:maven/org.springframework/spring-webmvc
+    expired_at: 2027-02-26
+    statement: >-
+      RCE/SSRF via XsltView. Requires rendering an XsltView behind a "/**" mapping. GuardGate exposes
+      JSON REST endpoints only and never uses XsltView or any view resolver.
+
+  - id: CVE-2026-47890
+    purls:
+      - pkg:maven/org.springframework/spring-webmvc
+      - pkg:maven/org.springframework/spring-webflux
+    expired_at: 2027-02-26
+    statement: >-
+      Stream corruption in Server-Sent Events with view fragments. GuardGate uses neither SSE
+      (SseEmitter / ServerSentEvent) nor view fragments.
+
+  - id: CVE-2026-47892
+    purls:
+      - pkg:maven/org.springframework/spring-webflux
+    expired_at: 2027-02-26
+    statement: >-
+      Header predicate bypass in WebFlux functional endpoints deployed with DispatcherServlet. The gateway
+      runs WebFlux on Netty and declares no RouterFunction endpoints; servlet services do not use WebFlux.

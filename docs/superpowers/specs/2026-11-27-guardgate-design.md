@@ -134,7 +134,7 @@ sequenceDiagram
 
 ## 4. Quyết định thiết kế
 
-Trạng thái: ✅ đã chốt (D5–D13 được duyệt 2026-11-27) · 🟡 **đề xuất, cần bàn**.
+Trạng thái: ✅ đã chốt (D5–D13 duyệt 2026-11-27; D14, D15, D18 duyệt 2026-11-28) · 🟡 **đề xuất, cần bàn**.
 
 | # | Quyết định | Lý do / Đánh đổi | |
 |---|---|---|---|
@@ -151,11 +151,11 @@ Trạng thái: ✅ đã chốt (D5–D13 được duyệt 2026-11-27) · 🟡 **
 | D11 | Không tạo module dùng chung (`common`); chấp nhận trùng lặp nhỏ (ProblemDetail writer, role converter) | Gateway là reactive còn service khác là servlet, API khác nhau; YAGNI | ✅ |
 | D12 | CORS chỉ cấu hình ở gateway, allow-list từ `CORS_ALLOWED_ORIGINS`, không cho credentials (token đi trong header) | Một chỗ duy nhất kiểm soát; service phía sau không trả header CORS | ✅ |
 | D13 | Timeout tới downstream: connect 2s, response 5s; body tối đa 1 MB | Chống treo kết nối và payload quá lớn (DoS) | ✅ |
-| D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | 🟡 |
-| D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | 🟡 |
+| D14 | Image runtime: `eclipse-temurin:21-jre-alpine`, user uid 10001, Spring Boot layered jar | Có shell/wget cho healthcheck và debug; distroless an toàn hơn nhưng khó học/debug | ✅ |
+| D15 | Staging cho CI: cluster **kind** dựng tạm trong runner GitHub Actions; deploy bằng Helm (giai đoạn 5); trước khi có Helm thì dùng docker compose | Miễn phí, tái lập được, không cần server thật | ✅ |
 | D16 | K8s local: **k3d** (k3s chạy trong Docker) trên Windows | Nhẹ hơn minikube, có sẵn Traefik ingress như k3s thật | 🟡 |
 | D17 | Postgres/Redis trên K8s: tự viết StatefulSet tối giản trong chart (chỉ cho dev/staging) | Bitnami đã đổi chính sách image (2025); production nên dùng dịch vụ managed | 🟡 |
-| D18 | Supply chain bổ sung: pin GitHub Actions theo SHA, Dependabot, SBOM CycloneDX, ký image bằng cosign (keyless) | Xu hướng SLSA; cosign và SBOM là tuỳ chọn, có thể bỏ nếu muốn gọn | 🟡 |
+| D18 | Supply chain bổ sung: pin GitHub Actions theo SHA, Dependabot, SBOM CycloneDX, ký image bằng cosign (keyless) | Xu hướng SLSA; cosign và SBOM là tuỳ chọn, có thể bỏ nếu muốn gọn | ✅ |
 | D19 | Metrics: `/actuator/prometheus` mở trên **cổng quản trị riêng** (9090 nội bộ), không route qua gateway | Không lộ metrics ra Internet | 🟡 |
 
 ## 5. Yêu cầu chung (áp dụng mọi giai đoạn)
