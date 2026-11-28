@@ -81,6 +81,37 @@ violations=$(jq -r \
     ] )
   | .[]' <<<"$docs")
 
+# ---- Mạng: default-deny, không rule "mở cho tất cả", Ingress chỉ trỏ vào gateway ----
+net_violations=$(jq -r '
+  def empty_peer: . == null or . == [] or any(.[]; . == {});
+  [ .[] | select(.kind == "NetworkPolicy") ] as $np
+  | ( if any($np[]; .spec.podSelector == {} and ((.spec.policyTypes // []) | sort) == ["Egress","Ingress"]
+                   and (.spec.ingress // []) == [] and (.spec.egress // []) == [])
+        then empty else "missing default-deny NetworkPolicy (podSelector: {}, Ingress+Egress, no rules)" end ),
+    ( $np[] | .metadata.name as $n
+      | ((.spec.ingress // [])[] | select(.from | empty_peer) | "networkpolicy \($n): ingress rule allows any source"),
+        ((.spec.egress // [])[]  | select(.to   | empty_peer) | "networkpolicy \($n): egress rule allows any destination"),
+        ((.spec.ingress // [])[], (.spec.egress // [])[] | select((.ports // []) == [])
+          | "networkpolicy \($n): rule without ports opens every port") ),
+    ( ["auth-service","gateway","demo-service","postgres","redis"]
+        - [ $np[] | .spec.podSelector.matchLabels["app.kubernetes.io/name"] // empty ]
+      | .[] | "workload \(.) has no dedicated NetworkPolicy" ),
+    ( [ .[] | select(.kind == "Ingress") ] as $ing
+      | (if ($ing | length) != 1 then "expected exactly one Ingress, got \($ing | length)" else empty end),
+        ( $ing[] | [ .spec.rules[]?.http.paths[]?.backend.service.name, .spec.defaultBackend.service.name // empty ]
+          | unique | select(. != ["gateway"]) | "Ingress must route only to gateway, routes to \(.)" ) )
+' <<<"$docs")
+[[ -n "$net_violations" ]] && violations+=$'\n'"$net_violations"
+
+# ---- Namespace (render riêng với create=true — đúng template mà scripts/k8s/up.sh apply) ----
+ns=$(helm template gg "$CHART" --namespace guardgate "${extra[@]}" --set namespace.create=true \
+       --show-only templates/namespace.yaml | docker run --rm -i "$YQ_IMAGE" -o=json -I=0 '.metadata.labels')
+for mode in enforce audit warn; do
+  [[ "$(jq -r --arg k "pod-security.kubernetes.io/$mode" '.[$k] // ""' <<<"$ns")" == restricted ]] \
+    || violations+=$'\n'"namespace: label pod-security.kubernetes.io/$mode must be restricted"
+done
+violations=${violations#$'\n'}
+
 # Script init Postgres trong chart phải giống hệt bản docker-compose dùng (một nguồn sự thật)
 if ! cmp -s infra/postgres/init/01-create-auth-db.sh "$CHART/files/01-create-auth-db.sh"; then
   violations+=$'\n'"chart files/01-create-auth-db.sh differs from infra/postgres/init/01-create-auth-db.sh"

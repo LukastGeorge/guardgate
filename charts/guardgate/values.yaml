@@ -132,3 +132,24 @@ redis:
     limits: {cpu: 250m, memory: 256Mi}
   # REDIS_PASSWORD
   secretName: guardgate-redis
+
+# ---------- Mạng ----------
+ingress:
+  enabled: true
+  className: traefik
+  host: guardgate.localhost
+  # Tên Secret TLS (tạo ngoài chart). Rỗng = chỉ HTTP (k3d local).
+  tlsSecretName: ""
+
+networkPolicy:
+  enabled: true
+  # Pod ingress controller được phép gọi gateway (k3s: Traefik trong kube-system)
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+  # DNS của cluster (CoreDNS)
+  dns:
+    namespace: kube-system
+    podLabels:
+      k8s-app: kube-dns

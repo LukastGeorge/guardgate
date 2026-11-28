@@ -1,0 +1,29 @@
+{{- if .Values.ingress.enabled }}
+# Điểm vào DUY NHẤT từ ngoài cluster: mọi request đi qua gateway (JWT, rate limit, header bảo mật)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: guardgate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tlsSecretName }}
+  tls:
+    - hosts: [{{ $.Values.ingress.host | quote }}]
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  name: http
+{{- end }}

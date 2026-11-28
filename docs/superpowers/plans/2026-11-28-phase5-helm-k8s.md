@@ -76,7 +76,7 @@
 
 - [ ] **Step 1: Mở rộng test**: có policy default-deny chọn mọi pod (`podSelector: {}`, cả hai `policyTypes`); không policy nào cho phép ingress từ mọi nơi (`from: []`); namespace có nhãn `enforce: restricted`; Ingress chỉ có một backend là `gateway`.
 - [ ] **Step 2: Chạy** → FAIL.
-- [ ] **Step 3: Viết template** → test pass.
+- [x] **Step 3: Viết template** → test pass.
 - [ ] **Step 4: Commit**: `feat(helm): default-deny network policies, restricted pod security, traefik ingress`
 
 ### Task 4: Deploy thật lên k3d + kiểm tra runtime
