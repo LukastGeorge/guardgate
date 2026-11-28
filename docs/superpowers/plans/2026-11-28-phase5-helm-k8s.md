@@ -17,7 +17,7 @@
 - Namespace `guardgate`, gắn nhãn Pod Security Admission `pod-security.kubernetes.io/enforce: restricted` (+ `audit`, `warn`).
 - Mọi container: `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault`, `readOnlyRootFilesystem: true` (thư mục cần ghi dùng `emptyDir`), có `resources.requests` và `limits`, `automountServiceAccountToken: false`.
 - Image ứng dụng lấy từ `values.image.registry` + `values.image.tag` (mặc định là SHA commit; local dùng image build bằng Dockerfile của GĐ4 rồi `k3d image import`).
-- Secret (D21): `guardgate-auth` (JWT_PRIVATE_KEY, AUTH_DB_PASSWORD, BOOTSTRAP_ADMIN_PASSWORD), `guardgate-gateway` (REDIS_PASSWORD), `guardgate-postgres` (POSTGRES_ADMIN_PASSWORD, AUTH_DB_PASSWORD), `guardgate-redis` (REDIS_PASSWORD). Gateway và demo-service **không** mount `guardgate-auth`.
+- Secret (D21): `guardgate-auth` (JWT_PRIVATE_KEY, AUTH_DB_PASSWORD, REDIS_PASSWORD — auth ghi denylist khi logout, BOOTSTRAP_ADMIN_PASSWORD), `guardgate-gateway` (REDIS_PASSWORD), `guardgate-postgres` (POSTGRES_ADMIN_PASSWORD, AUTH_DB_PASSWORD), `guardgate-redis` (REDIS_PASSWORD). Gateway và demo-service **không** mount `guardgate-auth`.
 - Ingress host mặc định `guardgate.localhost`; gateway chạy với `GATEWAY_TRUSTED_PROXIES=1` (Traefik là proxy duy nhất phía trước).
 - Probe: `startupProbe` `/actuator/health/liveness` (tối đa 120 giây), `readinessProbe` `/actuator/health/readiness`, `livenessProbe` `/actuator/health/liveness`.
 - Cổng chặn mới: `helm lint`, `helm template | kubeconform -strict`, `trivy config` (HIGH/CRITICAL), `scripts/tests/helm-policy.test.sh`.
@@ -45,7 +45,7 @@
 
 - [ ] **Step 1: Viết `helm-policy.test.sh`** với các assertion trên manifest đã render: mọi container có đủ securityContext như Global Constraints; có requests/limits; `automountServiceAccountToken: false`; không có `hostPath`, `hostNetwork`, `privileged`; image không dùng tag `latest`; gateway và demo không tham chiếu Secret `guardgate-auth`; không có object `kind: Secret` nào trong output.
 - [ ] **Step 2: Chạy** → FAIL (chart chưa tồn tại).
-- [ ] **Step 3: Viết chart** đến khi test pass; thêm `helm lint` và `kubeconform -strict -summary` (chạy bằng image pin digest).
+- [x] **Step 3: Viết chart** đến khi test pass; thêm `helm lint` và `kubeconform -strict -summary` (chạy bằng image pin digest).
 - [ ] **Step 4: `trivy config charts/guardgate`** (HIGH/CRITICAL, exit 1) → exit 0.
 - [ ] **Step 5: Commit**: `feat(helm): chart with hardened workloads for the three services`
 

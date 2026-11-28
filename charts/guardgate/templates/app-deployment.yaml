@@ -1,0 +1,79 @@
+{{- range $name, $app := .Values.apps }}
+{{- if $app.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" $ | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" $name "root" $) | nindent 4 }}
+spec:
+  replicas: {{ $app.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "guardgate.selectorLabels" (dict "name" $name "root" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "guardgate.labels" $ | nindent 8 }}
+        {{- include "guardgate.selectorLabels" (dict "name" $name "root" $) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      # Tắt biến môi trường kiểu Docker-links (vd. AUTH_SERVICE_PORT=tcp://10.x:8081) mà K8s tự bơm vào:
+      # chúng TRÙNG TÊN với biến cấu hình của app (AUTH_SERVICE_PORT, REDIS_PORT...) và làm app khởi động sai.
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "guardgate.image" (dict "name" $name "app" $app "root" $) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ $app.port }}
+              protocol: TCP
+          env:
+            - name: JWT_ISSUER
+              value: {{ $.Values.jwt.issuer | quote }}
+            - name: JWT_AUDIENCE
+              value: {{ $.Values.jwt.audience | quote }}
+            {{- range $k, $v := $app.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- with $app.secretRefs }}
+          # Secret tạo ngoài chart; chỉ tham chiếu theo tên
+          envFrom:
+            {{- range . }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml $app.resources | nindent 12 }}
+          startupProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            {{- toYaml $.Values.probes.startup | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            {{- toYaml $.Values.probes.readiness | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            {{- toYaml $.Values.probes.liveness | nindent 12 }}
+          volumeMounts:
+            # Root FS chỉ đọc; Tomcat/Netty cần /tmp ghi được -> emptyDir trên RAM, có giới hạn dung lượng
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+{{- end }}
+{{- end }}

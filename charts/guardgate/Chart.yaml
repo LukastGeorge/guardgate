@@ -1,0 +1,9 @@
+apiVersion: v2
+name: guardgate
+description: GuardGate — API gateway + auth-service + demo-service, hardened for Pod Security "restricted"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/LukastGeorge/guardgate
+sources:
+  - https://github.com/LukastGeorge/guardgate

@@ -39,6 +39,8 @@ violations=$(jq -r '
       | map("missing Deployment \(.)") ),
   ( [ pods as $p
       | (if $p.spec.automountServiceAccountToken != false then "\($p.name): automountServiceAccountToken must be false" else empty end),
+        (if $p.spec.enableServiceLinks != false
+           then "\($p.name): enableServiceLinks must be false (K8s-injected *_PORT vars clash with app config)" else empty end),
         (if ($p.spec.hostNetwork // false) or ($p.spec.hostPID // false) or ($p.spec.hostIPC // false)
            then "\($p.name): host namespaces are forbidden" else empty end),
         ( ($p.spec.volumes // [])[] | select(.hostPath) | "\($p.name): hostPath volume \(.name) is forbidden" ),

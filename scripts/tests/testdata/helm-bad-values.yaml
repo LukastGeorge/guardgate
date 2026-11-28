@@ -1,0 +1,16 @@
+# Values CỐ TÌNH vi phạm chính sách: helm-policy.test.sh phải FAIL với từng lỗi dưới đây.
+image:
+  tag: "1.0"
+containerSecurityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: true
+  readOnlyRootFilesystem: false
+  capabilities:
+    add: [NET_ADMIN]
+podSecurityContext:
+  runAsNonRoot: true
+apps:
+  gateway:
+    secretRefs: [guardgate-auth]
+    resources:
+      limits: {memory: 512Mi}
