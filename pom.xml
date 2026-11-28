@@ -57,7 +57,7 @@
             <dependency>
                 <groupId>com.nimbusds</groupId>
                 <artifactId>nimbus-jose-jwt</artifactId>
-                <version>9.37.4</version>
+                <version>10.10</version>
             </dependency>
             <!-- Kéo vào qua spring-cloud-starter → spring-security-rsa; 1.80.2 có CVE-2026-8763 (CRITICAL), CVE-2026-13506 -->
             <dependency>
