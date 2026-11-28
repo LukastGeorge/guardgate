@@ -1,0 +1,19 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 4 }}
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+{{- end }}

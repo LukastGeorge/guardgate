@@ -1,0 +1,116 @@
+{{- if .Values.postgres.enabled }}
+{{- $pg := .Values.postgres }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "postgres" "root" .) | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "postgres" "root" .) | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "guardgate.selectorLabels" (dict "name" "postgres" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "guardgate.labels" . | nindent 8 }}
+        {{- include "guardgate.selectorLabels" (dict "name" "postgres" "root" .) | nindent 8 }}
+      annotations:
+        checksum/init: {{ .Files.Get "files/01-create-auth-db.sh" | sha256sum }}
+    spec:
+      serviceAccountName: postgres
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $pg.runAsUser }}
+        runAsGroup: {{ $pg.runAsUser }}
+        fsGroup: {{ $pg.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ $pg.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            # Superuser chỉ để init/quản trị; auth-service dùng user riêng (least privilege)
+            - name: POSTGRES_USER
+              value: {{ $pg.adminUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ $pg.secretName }}, key: POSTGRES_ADMIN_PASSWORD}
+            - name: POSTGRES_DB
+              value: postgres
+            - name: AUTH_DB_NAME
+              value: {{ .Values.authDb.name | quote }}
+            - name: AUTH_DB_USER
+              value: {{ .Values.authDb.user | quote }}
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ $pg.secretName }}, key: AUTH_DB_PASSWORD}
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+            # Thư mục con: "lost+found" ở gốc volume làm initdb từ chối thư mục không rỗng
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            {{- toYaml $pg.resources | nindent 12 }}
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d postgres"]
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d postgres"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d postgres"]
+            periodSeconds: 20
+            timeoutSeconds: 3
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+            # Root FS chỉ đọc: socket/lock và file tạm cần chỗ ghi riêng
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+            defaultMode: 0555
+        - name: run
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ $pg.storage }}
+{{- end }}

@@ -1,0 +1,14 @@
+{{- if .Values.postgres.enabled }}
+# Script init dùng CHUNG với docker-compose (infra/postgres/init); helm-policy test kiểm tra hai bản giống hệt nhau.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "postgres" "root" .) | nindent 4 }}
+data:
+  01-create-auth-db.sh: |-
+    {{- .Files.Get "files/01-create-auth-db.sh" | nindent 4 }}
+{{- end }}

@@ -61,7 +61,7 @@
 
 - [ ] **Step 1: Mở rộng test**: StatefulSet cũng phải qua toàn bộ kiểm tra securityContext; Postgres `runAsUser: 70` (alpine postgres), Redis `runAsUser: 999`; root FS read-only với `emptyDir` cho thư mục runtime.
 - [ ] **Step 2: Chạy** → FAIL.
-- [ ] **Step 3: Viết template + `create-secrets.sh`** → test pass, `helm lint` + kubeconform + trivy config xanh.
+- [x] **Step 3: Viết template + `create-secrets.sh`** → test pass, `helm lint` + kubeconform + trivy config xanh.
 - [ ] **Step 4: Commit**: `feat(helm): postgres and redis statefulsets with per-component secrets`
 
 ### Task 3: NetworkPolicy, Pod Security, Ingress

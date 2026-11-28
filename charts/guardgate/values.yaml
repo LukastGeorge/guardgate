@@ -3,8 +3,9 @@
 # và chỉ được tham chiếu theo tên qua `secretRefs` (D21: mỗi component chỉ thấy secret của nó).
 
 namespace:
-  # true: chart tạo Namespace (kèm nhãn Pod Security Admission). false: namespace do người vận hành tạo.
-  create: true
+  # false (mặc định): namespace được tạo TRƯỚC khi cài chart (Secret phải có sẵn trước khi pod chạy).
+  # scripts/k8s/up.sh render chính template này với create=true rồi kubectl apply -> nhãn PSA chỉ khai báo một nơi.
+  create: false
 
 image:
   # Ảnh = <registry>/guardgate-<app>:<tag>[@<digest>]. CI đặt tag = SHA commit và digest đã cosign verify.
@@ -29,6 +30,11 @@ containerSecurityContext:
   capabilities:
     drop: [ALL]
 
+# Database riêng của auth-service (không phải secret). Postgres init và auth-service cùng đọc giá trị này.
+authDb:
+  name: guardgate_auth
+  user: guardgate_auth
+
 # Thông số JWT dùng chung cho cả 3 service (không phải secret)
 jwt:
   issuer: guardgate-auth
@@ -47,8 +53,8 @@ apps:
       AUTH_SERVICE_PORT: "8081"
       DB_HOST: postgres
       POSTGRES_PORT: "5432"
-      AUTH_DB_NAME: guardgate_auth
-      AUTH_DB_USER: guardgate_auth
+      AUTH_DB_NAME: "{{ .Values.authDb.name }}"
+      AUTH_DB_USER: "{{ .Values.authDb.user }}"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       JWT_ACCESS_TOKEN_TTL: 15m
@@ -100,3 +106,29 @@ probes:
   startup: {periodSeconds: 5, failureThreshold: 24, timeoutSeconds: 3}
   readiness: {periodSeconds: 10, failureThreshold: 3, timeoutSeconds: 3}
   liveness: {periodSeconds: 10, failureThreshold: 3, timeoutSeconds: 3}
+
+# ---------- Hạ tầng dữ liệu (chỉ dành cho dev/staging; production nên dùng dịch vụ managed) ----------
+postgres:
+  enabled: true
+  image: postgres:17.6-alpine
+  adminUser: guardgate_admin
+  # uid/gid của user "postgres" trong image alpine
+  runAsUser: 70
+  storage: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  # POSTGRES_ADMIN_PASSWORD, AUTH_DB_PASSWORD
+  secretName: guardgate-postgres
+
+redis:
+  enabled: true
+  image: redis:7.4.6-alpine
+  # uid/gid của user "redis" trong image alpine
+  runAsUser: 999
+  storage: 1Gi
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+  # REDIS_PASSWORD
+  secretName: guardgate-redis

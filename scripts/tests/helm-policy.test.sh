@@ -25,7 +25,10 @@ printf '%s\n' "$rendered" | docker run --rm -i "$KUBECONFORM_IMAGE" -strict -sum
 docs=$(printf '%s\n' "$rendered" | docker run --rm -i "$YQ_IMAGE" -o=json -I=0 'select(. != null)' | jq -s '.') \
   || { echo "FAIL: could not convert rendered manifests to JSON"; exit 1; }
 
-violations=$(jq -r '
+violations=$(jq -r \
+  --argjson allowed '{"auth-service":["guardgate-auth"],"gateway":["guardgate-gateway"],"demo-service":[],
+                      "postgres":["guardgate-postgres"],"redis":["guardgate-redis"]}' \
+  --argjson uids '{"auth-service":10001,"gateway":10001,"demo-service":10001,"postgres":70,"redis":999}' '
   def pods: .[] | select(.kind == "Deployment" or .kind == "StatefulSet")
             | {name: .metadata.name, spec: .spec.template.spec};
   def containers($p): ($p.spec.containers // []) + ($p.spec.initContainers // []);
@@ -37,6 +40,8 @@ violations=$(jq -r '
   ( [ .[] | select(.kind == "Secret") | "manifest contains a Secret object: \(.metadata.name) (secrets must come from existingSecret)" ] ),
   ( ["auth-service","gateway","demo-service"] - [ .[] | select(.kind == "Deployment") | .metadata.name ]
       | map("missing Deployment \(.)") ),
+  ( ["postgres","redis"] - [ .[] | select(.kind == "StatefulSet") | .metadata.name ]
+      | map("missing StatefulSet \(.)") ),
   ( [ pods as $p
       | (if $p.spec.automountServiceAccountToken != false then "\($p.name): automountServiceAccountToken must be false" else empty end),
         (if $p.spec.enableServiceLinks != false
@@ -62,6 +67,11 @@ violations=$(jq -r '
         ),
         ( if ($p.name == "gateway" or $p.name == "demo-service") and (secret_refs($p) | index("guardgate-auth")) != null
             then "\($p.name): must not reference Secret guardgate-auth (JWT signing key, DB password)" else empty end ),
+        # D21: mỗi workload chỉ được tham chiếu đúng Secret của nó
+        ( (secret_refs($p) | unique) - ($allowed[$p.name] // []) | .[]
+          | "\($p.name): references Secret \(.) outside its allow-list" ),
+        ( if ($uids[$p.name] != null) and ($p.spec.securityContext.runAsUser != $uids[$p.name])
+            then "\($p.name): pod runAsUser must be \($uids[$p.name])" else empty end ),
         ( if ($p.name | IN("auth-service","gateway","demo-service"))
             then ( $p.spec.containers[0] as $c
                    | (if $c.startupProbe == null then "\($p.name): startupProbe required" else empty end),
@@ -70,6 +80,12 @@ violations=$(jq -r '
             else empty end )
     ] )
   | .[]' <<<"$docs")
+
+# Script init Postgres trong chart phải giống hệt bản docker-compose dùng (một nguồn sự thật)
+if ! cmp -s infra/postgres/init/01-create-auth-db.sh "$CHART/files/01-create-auth-db.sh"; then
+  violations+=$'\n'"chart files/01-create-auth-db.sh differs from infra/postgres/init/01-create-auth-db.sh"
+  violations=${violations#$'\n'}
+fi
 
 if [[ -n "$violations" ]]; then
   echo "$violations" | sed 's/^/FAIL: /'

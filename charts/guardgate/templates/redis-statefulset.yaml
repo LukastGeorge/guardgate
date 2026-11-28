@@ -1,0 +1,103 @@
+{{- if .Values.redis.enabled }}
+{{- $r := .Values.redis }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "guardgate.labels" . | nindent 4 }}
+    {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 4 }}
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "guardgate.labels" . | nindent 8 }}
+        {{- include "guardgate.selectorLabels" (dict "name" "redis" "root" .) | nindent 8 }}
+    spec:
+      serviceAccountName: redis
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $r.runAsUser }}
+        runAsGroup: {{ $r.runAsUser }}
+        fsGroup: {{ $r.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: {{ $r.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            # redis-cli tự đọc REDISCLI_AUTH -> mật khẩu không nằm trong tham số lệnh của probe
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef: {name: {{ $r.secretName }}, key: REDIS_PASSWORD}
+          # Giống docker-compose: bắt buộc mật khẩu, tắt các lệnh nguy hiểm
+          command:
+            - sh
+            - -c
+            - >-
+              exec redis-server
+              --requirepass "$REDISCLI_AUTH"
+              --appendonly yes
+              --dir /data
+              --protected-mode yes
+              --rename-command FLUSHALL ""
+              --rename-command FLUSHDB ""
+              --rename-command CONFIG ""
+              --rename-command DEBUG ""
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            {{- toYaml $r.resources | nindent 12 }}
+          startupProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 20
+            timeoutSeconds: 3
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ $r.storage }}
+{{- end }}

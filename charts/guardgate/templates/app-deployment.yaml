@@ -45,7 +45,7 @@ spec:
               value: {{ $.Values.jwt.audience | quote }}
             {{- range $k, $v := $app.env }}
             - name: {{ $k }}
-              value: {{ $v | quote }}
+              value: {{ tpl (toString $v) $ | quote }}
             {{- end }}
           {{- with $app.secretRefs }}
           # Secret tạo ngoài chart; chỉ tham chiếu theo tên
